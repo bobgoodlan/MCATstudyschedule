@@ -45,9 +45,9 @@ if uploaded_file:
     for _, row in filtered.iterrows():
         tasks_by_day[row['Date'].date()].append(f"{row['Task Type']}: {row['Topic']}")
 
-    # Determine the first week to display
-    start_date = min(tasks_by_day.keys())
-    week_start = start_date - timedelta(days=start_date.weekday())
+    # Determine the current week (Monday–Sunday) based on today
+    today = datetime.today().date()
+    week_start = today - timedelta(days=today.weekday())  # Monday of this week
     week_days = [week_start + timedelta(days=i) for i in range(7)]
 
     # Display calendar-style layout
