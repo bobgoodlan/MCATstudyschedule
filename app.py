@@ -98,6 +98,7 @@ with c2:
     st.bar_chart(pd.Series(counts_by_day), use_container_width=True)
 
 # ─── Weekly Calendar View with Checkboxes ─────────────────────────────────────
+# ─── Weekly Calendar View with Checkboxes ─────────────────────────────────────
 st.markdown("### 📆 Weekly View")
 cols = st.columns(7)
 for idx, day in enumerate(week_days):
@@ -106,21 +107,25 @@ for idx, day in enumerate(week_days):
         day_list = tasks_by_day.get(day, [])
         if not day_list:
             st.markdown("_No tasks_")
+            continue
+
         for tp, topic, key in day_list:
-            # retrieve existing state or default to False
-            done = st.checkbox(
-                label=f"{badge(tp)}  {topic}",
-                key=key,
-                value=st.session_state.get(key, False),
-                unsafe_allow_html=True
+            # Create two mini-columns: one for the checkbox, one for the HTML badge & text
+            cb_col, txt_col = st.columns([1, 9])
+            done = cb_col.checkbox(
+                label="", 
+                key=key, 
+                value=st.session_state.get(key, False)
             )
             st.session_state[key] = done
-            # if done, strike through the text
-            if done:
-                st.markdown(
-                    f"<span style='text-decoration:line-through;color:gray;font-size:0.9em'>{topic}</span>",
-                    unsafe_allow_html=True
-                )
+
+            # Render badge + topic, with strikethrough if done
+            display_text = (
+                f"{badge(tp)} <span style='text-decoration:line-through;color:gray'>{topic}</span>"
+                if done
+                else f"{badge(tp)} {topic}"
+            )
+            txt_col.markdown(display_text, unsafe_allow_html=True)
 
 # ─── Optional: Raw Data ────────────────────────────────────────────────────────
 with st.expander("📋 View Raw Data Table"):
