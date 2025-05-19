@@ -94,10 +94,8 @@ st.markdown("### 📊 This Week’s Summary")
 c1, c2 = st.columns([1,3])
 with c1:
     st.metric("Total Tasks", len(week_tasks))
-# Build a Series and strip out the time component by formatting dates as strings
 with c2:
     st.bar_chart(pd.Series(counts_by_day), use_container_width=True)
-
 
 # ─── Weekly Calendar View with Checkboxes ─────────────────────────────────────
 st.markdown("### 📆 Weekly View")
