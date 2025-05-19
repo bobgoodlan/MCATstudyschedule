@@ -95,10 +95,8 @@ c1, c2 = st.columns([1,3])
 with c1:
     st.metric("Total Tasks", len(week_tasks))
 # Build a Series and strip out the time component by formatting dates as strings
-counts_series = pd.Series(counts_by_day)
-counts_series.index = counts_series.index.strftime('%Y-%m-%d')  # e.g. “2025-05-19”
 with c2:
-    st.bar_chart(counts_series, use_container_width=True)
+    st.bar_chart(pd.Series(counts_by_day), use_container_width=True)
 
 
 # ─── Weekly Calendar View with Checkboxes ─────────────────────────────────────
