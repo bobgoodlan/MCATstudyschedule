@@ -33,14 +33,20 @@ if uploaded_file:
     )
 
     # Drop rows without a Date, then convert to datetime
-    melted = melted.dropna(subset=["Date"])
+    melted = melted.dropna(subset=["Date"]).copy()
     melted["Date"] = pd.to_datetime(melted["Date"])
 
-    # ───────── Shift Any 6/23–6/25 Tasks ─────────
+    # ───────── Shift “Study Date” Tasks Only ─────────
+    # We only want to push Study Date tasks off of 6/23, 6/24, 6/25.
     busy_start = datetime(2025, 6, 23).date()
     busy_end   = datetime(2025, 6, 25).date()
 
-    def shift_if_busy(ts: pd.Timestamp) -> pd.Timestamp:
+    def shift_study_date(ts: pd.Timestamp) -> pd.Timestamp:
+        """
+        Assumes ts is a Timestamp for a “Study Date” row.
+        If ts.date() is 6/23, 6/24, or 6/25/2025, keep adding +1 day
+        until the date is > 6/25. Otherwise return ts unchanged.
+        """
         if pd.isna(ts):
             return ts
         current_date = ts.date()
@@ -48,19 +54,29 @@ if uploaded_file:
             current_date += timedelta(days=1)
         return pd.Timestamp(current_date)
 
-    melted["Date"] = melted["Date"].apply(shift_if_busy)
+    # Build a mask for “Study Date” rows in our melted DataFrame
+    is_study = melted["Task Type"] == "Study Date"
+
+    # Only apply the shifting function to those “Study Date” rows
+    melted.loc[is_study, "Date"] = melted.loc[is_study, "Date"].apply(shift_study_date)
+    # All other rows (reviews) keep their original Date, even if it’s 6/23–6/25
+    # ─────────────────────────────────────────────────────────
 
     # ── Prevent multiple “Study Date” tasks on the same day ──
-    study_mask = melted["Task Type"] == "Study Date"
-    study_df = melted[study_mask].copy()
-    occupied = set()
+    # (We’ve already shifted each “Study Date” so none land on 6/23–6/25.
+    # But we still want no two “Study Date” tasks on exactly the same date.)
+    study_df = melted[is_study].copy()
+    occupied = set()  # track which dates already have a Study Date
 
+    # Sort by Date so we fill earlier days first, then move conflicted ones forward
     for idx, row in study_df.sort_values("Date").iterrows():
         d = row["Date"].date()
         if d not in occupied:
             occupied.add(d)
         else:
+            # If this exact date is already taken, bump forward until we find a free day
             candidate = d + timedelta(days=1)
+            # Skip over any date in [6/23, 6/25] (conference) or anything in occupied
             while (busy_start <= candidate <= busy_end) or (candidate in occupied):
                 candidate += timedelta(days=1)
             melted.at[idx, "Date"] = pd.Timestamp(candidate)
@@ -77,7 +93,7 @@ if uploaded_file:
     week_start = selected_date - timedelta(days=selected_date.weekday())
     week_days = [week_start + timedelta(days=i) for i in range(7)]
 
-    # 2) Task‐Type filter
+    # 2) Task-Type filter
     task_types = melted["Task Type"].unique().tolist()
     selected_types = st.sidebar.multiselect("Task Types", task_types, default=task_types)
 
@@ -85,7 +101,7 @@ if uploaded_file:
     search_topic = st.sidebar.text_input("Search Topic")
 
     # ───────── Filter the Data ─────────
-    filtered = melted[melted["Task Type"].isin(selected_types)]
+    filtered = melted[melted["Task Type"].isin(selected_types)].copy()
     if search_topic:
         filtered = filtered[filtered["Topic"].str.contains(search_topic, case=False, na=False)]
 
@@ -119,7 +135,7 @@ if uploaded_file:
 
     for i, day in enumerate(week_days):
         with cols[i]:
-            # Day header, e.g. “Monday Jun 09”
+            # Day header, e.g. “Thursday Jun 19”
             st.markdown(
                 f"**{calendar.day_name[day.weekday()]}<br>{day.strftime('%b %d')}**",
                 unsafe_allow_html=True,
@@ -130,22 +146,22 @@ if uploaded_file:
                 st.markdown("_No tasks_")
             else:
                 for idx, (task_type, topic) in enumerate(day_tasks):
-                    # Unique key for each checkbox
+                    # Unique key for each checkbox (date, type, topic, index)
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
 
-                    # Two mini‐columns: [checkbox] [pill+topic combined]
+                    # Two mini-columns: [checkbox] [pill+topic combined]
                     cb_col, content_col = st.columns([1, 11])
                     with cb_col:
                         st.checkbox("", key=key)
                     with content_col:
-                        # Render pill and topic on the same horizontal line
+                        # Render pill + topic on one horizontal line
                         color = color_map.get(task_type, "#000000")
                         st.markdown(
                             f"<span style='background-color:{color};"
                             f" color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.9em; vertical-align:middle; "
-                            f"display:inline-block;'>{task_type}</span>"
-                            f"&nbsp;{topic}",
+                            f"font-size:0.9em; display:inline-block;'>"
+                            f"{task_type}</span>"
+                            f"&nbsp;<span style='vertical-align:middle;'>{topic}</span>",
                             unsafe_allow_html=True,
                         )
 
