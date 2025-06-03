@@ -37,46 +37,33 @@ if uploaded_file:
     melted["Date"] = pd.to_datetime(melted["Date"])
 
     # ───────── Shift “Study Date” Tasks Only ─────────
-    # We only want to push Study Date tasks off of 6/23, 6/24, 6/25.
     busy_start = datetime(2025, 6, 23).date()
     busy_end   = datetime(2025, 6, 25).date()
 
     def shift_study_date(ts: pd.Timestamp) -> pd.Timestamp:
-        """
-        Assumes ts is a Timestamp for a “Study Date” row.
-        If ts.date() is 6/23, 6/24, or 6/25/2025, keep adding +1 day
-        until the date is > 6/25. Otherwise return ts unchanged.
-        """
         if pd.isna(ts):
             return ts
-        current_date = ts.date()
-        while busy_start <= current_date <= busy_end:
-            current_date += timedelta(days=1)
-        return pd.Timestamp(current_date)
+        d = ts.date()
+        # Only shift if this is a “Study Date” and falls on 6/23–6/25
+        if busy_start <= d <= busy_end:
+            while busy_start <= d <= busy_end:
+                d += timedelta(days=1)
+            return pd.Timestamp(d)
+        return ts
 
-    # Build a mask for “Study Date” rows in our melted DataFrame
+    # Apply only to “Study Date” rows
     is_study = melted["Task Type"] == "Study Date"
-
-    # Only apply the shifting function to those “Study Date” rows
     melted.loc[is_study, "Date"] = melted.loc[is_study, "Date"].apply(shift_study_date)
-    # All other rows (reviews) keep their original Date, even if it’s 6/23–6/25
-    # ─────────────────────────────────────────────────────────
 
     # ── Prevent multiple “Study Date” tasks on the same day ──
-    # (We’ve already shifted each “Study Date” so none land on 6/23–6/25.
-    # But we still want no two “Study Date” tasks on exactly the same date.)
     study_df = melted[is_study].copy()
-    occupied = set()  # track which dates already have a Study Date
-
-    # Sort by Date so we fill earlier days first, then move conflicted ones forward
+    occupied = set()
     for idx, row in study_df.sort_values("Date").iterrows():
         d = row["Date"].date()
         if d not in occupied:
             occupied.add(d)
         else:
-            # If this exact date is already taken, bump forward until we find a free day
             candidate = d + timedelta(days=1)
-            # Skip over any date in [6/23, 6/25] (conference) or anything in occupied
             while (busy_start <= candidate <= busy_end) or (candidate in occupied):
                 candidate += timedelta(days=1)
             melted.at[idx, "Date"] = pd.Timestamp(candidate)
@@ -86,14 +73,14 @@ if uploaded_file:
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
 
-    # 1) Week selector (choose any date; we'll show Mon–Sun of that week)
+    # 1) Week selector (Mon–Sun of that week)
     selected_date = st.sidebar.date_input(
         "Select a date (to view that week):", value=datetime.today().date()
     )
     week_start = selected_date - timedelta(days=selected_date.weekday())
     week_days = [week_start + timedelta(days=i) for i in range(7)]
 
-    # 2) Task-Type filter
+    # 2) Task‐Type filter
     task_types = melted["Task Type"].unique().tolist()
     selected_types = st.sidebar.multiselect("Task Types", task_types, default=task_types)
 
@@ -126,16 +113,15 @@ if uploaded_file:
     }
 
     # ───────── Display the Week ─────────
-    # 1) Show a bigger “Total tasks this week”
     st.markdown(f"<h2>Total tasks this week: {total_tasks_this_week}</h2>", unsafe_allow_html=True)
-
-    # 2) Show Monday–Sunday columns
     st.markdown("### 📆 Weekly View")
+
+    # Create 7 columns—one per day
     cols = st.columns(7)
 
     for i, day in enumerate(week_days):
         with cols[i]:
-            # Day header, e.g. “Thursday Jun 19”
+            # Day header: “Wednesday Jun 11”
             st.markdown(
                 f"**{calendar.day_name[day.weekday()]}<br>{day.strftime('%b %d')}**",
                 unsafe_allow_html=True,
@@ -145,27 +131,34 @@ if uploaded_file:
             if not day_tasks:
                 st.markdown("_No tasks_")
             else:
+                # Render each task in a tight, flex‐aligned <div>
                 for idx, (task_type, topic) in enumerate(day_tasks):
-                    # Unique key for each checkbox (date, type, topic, index)
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
+                    color = color_map.get(task_type, "#000000")
 
-                    # Two mini-columns: [checkbox] [pill+topic combined]
-                    cb_col, content_col = st.columns([1, 11])
+                    # Two mini‐columns: [checkbox] [content → pill + topic]
+                    cb_col, content_col = st.columns([1, 12])
                     with cb_col:
                         st.checkbox("", key=key)
                     with content_col:
-                        # Render pill + topic on one horizontal line
-                        color = color_map.get(task_type, "#000000")
-                        st.markdown(
-                            f"<span style='background-color:{color};"
-                            f" color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.9em; display:inline-block;'>"
+                        # Use a single <div> with display:flex and small margin‐bottom
+                        # to keep pill + topic on one line, with minimal spacing.
+                        html = (
+                            f"<div style='display:flex; align-items:center; "
+                            f"margin-bottom:4px;'>"
+                            # Colored pill, smaller font
+                            f"<span style='background-color:{color}; "
+                            f"color:white; padding:2px 6px; border-radius:4px; "
+                            f"font-size:0.85em; display:inline-block;'>"
                             f"{task_type}</span>"
-                            f"&nbsp;<span style='vertical-align:middle;'>{topic}</span>",
-                            unsafe_allow_html=True,
+                            # Small gap before topic text
+                            f"<span style='margin-left:6px; font-size:0.9em;'>"
+                            f"{topic}</span>"
+                            f"</div>"
                         )
+                        st.markdown(html, unsafe_allow_html=True)
 
-    # ───────── Optional: Show Data Table ─────────
+    # ───────── Optional: Data Table ─────────
     with st.expander("📋 View Data Table"):
         st.dataframe(filtered[["Date", "Task Type", "Topic"]].sort_values(by="Date"))
 
