@@ -36,38 +36,36 @@ if uploaded_file:
     melted = melted.dropna(subset=["Date"])
     melted["Date"] = pd.to_datetime(melted["Date"])
 
-    # ───────── Redirect June 23–25 Tasks ─────────
-    # If a task is scheduled on:
-    #   • June 23 or 24, 2025 → move it back to Friday, June 22, 2025
-    #   • June 25, 2025      → move it forward to Thursday, June 26, 2025
-    #
-    # (You can modify these “landing” dates if you’d rather shift onto
-    # a different weekday.) 
+    # ───────── Shift Any 6/23–6/25 Tasks ─────────
+    busy_start = datetime(2025, 6, 23).date()
+    busy_end   = datetime(2025, 6, 25).date()
 
-    def redirect_around_conference(ts: pd.Timestamp) -> pd.Timestamp:
+    def shift_if_busy(ts: pd.Timestamp) -> pd.Timestamp:
         if pd.isna(ts):
             return ts
-        d = ts.date()
+        current_date = ts.date()
+        while busy_start <= current_date <= busy_end:
+            current_date += timedelta(days=1)
+        return pd.Timestamp(current_date)
 
-        # Define the conference dates
-        june_23 = datetime(2025, 6, 23).date()
-        june_24 = datetime(2025, 6, 24).date()
-        june_25 = datetime(2025, 6, 25).date()
+    melted["Date"] = melted["Date"].apply(shift_if_busy)
 
-        # Friday before conference
-        friday_before = datetime(2025, 6, 22).date()
-        # Thursday after conference
-        thursday_after = datetime(2025, 6, 26).date()
+    # ── Prevent multiple “Study Date” tasks on the same day ──
+    study_mask = melted["Task Type"] == "Study Date"
+    study_df = melted[study_mask].copy()
+    occupied = set()
 
-        if d == june_23 or d == june_24:
-            return pd.Timestamp(friday_before)
-        elif d == june_25:
-            return pd.Timestamp(thursday_after)
+    for idx, row in study_df.sort_values("Date").iterrows():
+        d = row["Date"].date()
+        if d not in occupied:
+            occupied.add(d)
         else:
-            return ts
-
-    melted["Date"] = melted["Date"].apply(redirect_around_conference)
-    # ────────────────────────────────────────────
+            candidate = d + timedelta(days=1)
+            while (busy_start <= candidate <= busy_end) or (candidate in occupied):
+                candidate += timedelta(days=1)
+            melted.at[idx, "Date"] = pd.Timestamp(candidate)
+            occupied.add(candidate)
+    # ────────────────────────────────────────────────────────
 
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
@@ -132,7 +130,7 @@ if uploaded_file:
                 st.markdown("_No tasks_")
             else:
                 for idx, (task_type, topic) in enumerate(day_tasks):
-                    # Unique key for each checkbox (date, type, topic, index)
+                    # Unique key for each checkbox
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
 
                     # Two mini‐columns: [checkbox] [pill+topic combined]
@@ -140,14 +138,14 @@ if uploaded_file:
                     with cb_col:
                         st.checkbox("", key=key)
                     with content_col:
-                        # Render pill + topic on one horizontal line
+                        # Render pill and topic on the same horizontal line
                         color = color_map.get(task_type, "#000000")
                         st.markdown(
                             f"<span style='background-color:{color};"
                             f" color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.9em; display:inline-block;'>"
-                            f"{task_type}</span>"
-                            f"&nbsp;<span style='vertical-align:middle;'>{topic}</span>",
+                            f"font-size:0.9em; vertical-align:middle; "
+                            f"display:inline-block;'>{task_type}</span>"
+                            f"&nbsp;{topic}",
                             unsafe_allow_html=True,
                         )
 
