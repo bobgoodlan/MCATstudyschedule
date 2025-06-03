@@ -36,25 +36,38 @@ if uploaded_file:
     melted = melted.dropna(subset=["Date"])
     melted["Date"] = pd.to_datetime(melted["Date"])
 
-    # ───────── Shift June 23–25 → +3 Days ─────────
-    busy_start = datetime(2025, 6, 23).date()
-    busy_end   = datetime(2025, 6, 25).date()
-    shift_amount = (busy_end - busy_start).days + 1  # 3 days
+    # ───────── Redirect June 23–25 Tasks ─────────
+    # If a task is scheduled on:
+    #   • June 23 or 24, 2025 → move it back to Friday, June 22, 2025
+    #   • June 25, 2025      → move it forward to Thursday, June 26, 2025
+    #
+    # (You can modify these “landing” dates if you’d rather shift onto
+    # a different weekday.) 
 
-    def shift_if_june23_to_25(ts: pd.Timestamp) -> pd.Timestamp:
-        """
-        If ts.date() is June 23, 24, or 25 2025, add exactly 3 days.
-        Otherwise, return ts unchanged.
-        """
+    def redirect_around_conference(ts: pd.Timestamp) -> pd.Timestamp:
         if pd.isna(ts):
             return ts
         d = ts.date()
-        if busy_start <= d <= busy_end:
-            return pd.Timestamp(d + timedelta(days=shift_amount))
-        return ts
 
-    melted["Date"] = melted["Date"].apply(shift_if_june23_to_25)
-    # ────────────────────────────────────────────────────
+        # Define the conference dates
+        june_23 = datetime(2025, 6, 23).date()
+        june_24 = datetime(2025, 6, 24).date()
+        june_25 = datetime(2025, 6, 25).date()
+
+        # Friday before conference
+        friday_before = datetime(2025, 6, 22).date()
+        # Thursday after conference
+        thursday_after = datetime(2025, 6, 26).date()
+
+        if d == june_23 or d == june_24:
+            return pd.Timestamp(friday_before)
+        elif d == june_25:
+            return pd.Timestamp(thursday_after)
+        else:
+            return ts
+
+    melted["Date"] = melted["Date"].apply(redirect_around_conference)
+    # ────────────────────────────────────────────
 
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
