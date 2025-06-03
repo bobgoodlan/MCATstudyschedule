@@ -37,21 +37,22 @@ if uploaded_file:
     melted["Date"] = pd.to_datetime(melted["Date"])
 
     # ───────── Shift “Study Date” Tasks Only ─────────
+    # We only want to push Study Date tasks off of 6/23, 6/24, 6/25.
     busy_start = datetime(2025, 6, 23).date()
     busy_end   = datetime(2025, 6, 25).date()
 
     def shift_study_date(ts: pd.Timestamp) -> pd.Timestamp:
+        """
+        If ts falls on 6/23–6/25/2025 and is a “Study Date”, keep adding one day
+        until it lands after 6/25. Otherwise, return ts unchanged.
+        """
         if pd.isna(ts):
             return ts
         d = ts.date()
-        # Only shift if this is a “Study Date” and falls on 6/23–6/25
-        if busy_start <= d <= busy_end:
-            while busy_start <= d <= busy_end:
-                d += timedelta(days=1)
-            return pd.Timestamp(d)
-        return ts
+        while busy_start <= d <= busy_end:
+            d += timedelta(days=1)
+        return pd.Timestamp(d)
 
-    # Apply only to “Study Date” rows
     is_study = melted["Task Type"] == "Study Date"
     melted.loc[is_study, "Date"] = melted.loc[is_study, "Date"].apply(shift_study_date)
 
@@ -73,14 +74,14 @@ if uploaded_file:
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
 
-    # 1) Week selector (Mon–Sun of that week)
+    # 1) Week selector (choose any date; we'll show Mon–Sun of that week)
     selected_date = st.sidebar.date_input(
         "Select a date (to view that week):", value=datetime.today().date()
     )
     week_start = selected_date - timedelta(days=selected_date.weekday())
     week_days = [week_start + timedelta(days=i) for i in range(7)]
 
-    # 2) Task‐Type filter
+    # 2) Task-Type filter
     task_types = melted["Task Type"].unique().tolist()
     selected_types = st.sidebar.multiselect("Task Types", task_types, default=task_types)
 
@@ -113,52 +114,59 @@ if uploaded_file:
     }
 
     # ───────── Display the Week ─────────
-    st.markdown(f"<h2>Total tasks this week: {total_tasks_this_week}</h2>", unsafe_allow_html=True)
-    st.markdown("### 📆 Weekly View")
+    st.markdown(
+        f"<h2 style='margin-bottom:20px;'>"
+        f"Total tasks this week: {total_tasks_this_week}</h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<h3>📆 Weekly View</h3>", unsafe_allow_html=True)
 
-    # Create 7 columns—one per day
+    # Create one column per weekday
     cols = st.columns(7)
 
     for i, day in enumerate(week_days):
         with cols[i]:
-            # Day header: “Wednesday Jun 11”
+            # Day header with extra bottom margin for spacing
             st.markdown(
-                f"**{calendar.day_name[day.weekday()]}<br>{day.strftime('%b %d')}**",
+                f"<div style='margin-bottom:16px;'>"
+                f"<strong>{calendar.day_name[day.weekday()]}</strong><br>"
+                f"{day.strftime('%b %d')}</div>",
                 unsafe_allow_html=True,
             )
 
             day_tasks = tasks_by_day.get(day, [])
             if not day_tasks:
-                st.markdown("_No tasks_")
+                st.markdown("<div style='color:gray; font-style:italic;'>No tasks</div>", unsafe_allow_html=True)
             else:
-                # Render each task in a tight, flex‐aligned <div>
                 for idx, (task_type, topic) in enumerate(day_tasks):
+                    # Unique key for each checkbox
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
                     color = color_map.get(task_type, "#000000")
 
-                    # Two mini‐columns: [checkbox] [content → pill + topic]
-                    cb_col, content_col = st.columns([1, 12])
+                    # Two tiny columns: [checkbox] [card with pill + topic]
+                    cb_col, content_col = st.columns([1, 11])
                     with cb_col:
                         st.checkbox("", key=key)
                     with content_col:
-                        # Use a single <div> with display:flex and small margin‐bottom
-                        # to keep pill + topic on one line, with minimal spacing.
-                        html = (
-                            f"<div style='display:flex; align-items:center; "
-                            f"margin-bottom:4px;'>"
-                            # Colored pill, smaller font
+                        # A “card” div around pill + topic
+                        card_html = (
+                            f"<div "
+                            f"style='background-color:#2e2e2e; "
+                            f"border-radius:8px; padding:10px; margin-bottom:12px; "
+                            f"display:flex; align-items:center;'>"
+                            # Colored pill
                             f"<span style='background-color:{color}; "
-                            f"color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.85em; display:inline-block;'>"
+                            f"color:white; padding:4px 8px; border-radius:8px; "
+                            f"font-size:0.9em; font-weight:500; margin-right:8px;'>"
                             f"{task_type}</span>"
-                            # Small gap before topic text
-                            f"<span style='margin-left:6px; font-size:0.9em;'>"
+                            # Topic text
+                            f"<span style='font-size:0.9em; color:#e0e0e0;'>"
                             f"{topic}</span>"
                             f"</div>"
                         )
-                        st.markdown(html, unsafe_allow_html=True)
+                        st.markdown(card_html, unsafe_allow_html=True)
 
-    # ───────── Optional: Data Table ─────────
+    # ───────── Optional: Show Data Table ─────────
     with st.expander("📋 View Data Table"):
         st.dataframe(filtered[["Date", "Task Type", "Topic"]].sort_values(by="Date"))
 
