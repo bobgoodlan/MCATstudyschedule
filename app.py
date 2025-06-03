@@ -43,19 +43,34 @@ if uploaded_file:
     def shift_if_busy(ts: pd.Timestamp) -> pd.Timestamp:
         if pd.isna(ts):
             return ts
-
         current_date = ts.date()
         while busy_start <= current_date <= busy_end:
             current_date += timedelta(days=1)
         return pd.Timestamp(current_date)
 
     melted["Date"] = melted["Date"].apply(shift_if_busy)
-    # ────────────────────────────────────────────────
+
+    # ── Prevent multiple “Study Date” tasks on the same day ──
+    study_mask = melted["Task Type"] == "Study Date"
+    study_df = melted[study_mask].copy()
+    occupied = set()
+
+    for idx, row in study_df.sort_values("Date").iterrows():
+        d = row["Date"].date()
+        if d not in occupied:
+            occupied.add(d)
+        else:
+            candidate = d + timedelta(days=1)
+            while (busy_start <= candidate <= busy_end) or (candidate in occupied):
+                candidate += timedelta(days=1)
+            melted.at[idx, "Date"] = pd.Timestamp(candidate)
+            occupied.add(candidate)
+    # ────────────────────────────────────────────────────────
 
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
 
-    # 1) Week selector (choose any date; we’ll show Mon–Sun of that week)
+    # 1) Week selector (choose any date; we'll show Mon–Sun of that week)
     selected_date = st.sidebar.date_input(
         "Select a date (to view that week):", value=datetime.today().date()
     )
@@ -118,21 +133,21 @@ if uploaded_file:
                     # Unique key for each checkbox
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
 
-                    # Three mini‐columns: [checkbox] [colored pill with Task Type] [topic text]
-                    cb_col, pill_col, topic_col = st.columns([1, 2, 10])
+                    # Two mini‐columns: [checkbox] [pill+topic combined]
+                    cb_col, content_col = st.columns([1, 11])
                     with cb_col:
                         st.checkbox("", key=key)
-                    with pill_col:
-                        # Draw a “pill” (rounded rectangle) containing just the Task Type
+                    with content_col:
+                        # Render pill and topic on the same horizontal line
                         color = color_map.get(task_type, "#000000")
                         st.markdown(
                             f"<span style='background-color:{color};"
                             f" color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.9em; display:inline-block;'>{task_type}</span>",
+                            f"font-size:0.9em; vertical-align:middle; "
+                            f"display:inline-block;'>{task_type}</span>"
+                            f"&nbsp;{topic}",
                             unsafe_allow_html=True,
                         )
-                    with topic_col:
-                        st.write(topic)
 
     # ───────── Optional: Show Data Table ─────────
     with st.expander("📋 View Data Table"):
