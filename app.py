@@ -36,36 +36,25 @@ if uploaded_file:
     melted = melted.dropna(subset=["Date"])
     melted["Date"] = pd.to_datetime(melted["Date"])
 
-    # ───────── Shift Any 6/23–6/25 Tasks ─────────
+    # ───────── Shift June 23–25 → +3 Days ─────────
     busy_start = datetime(2025, 6, 23).date()
     busy_end   = datetime(2025, 6, 25).date()
+    shift_amount = (busy_end - busy_start).days + 1  # 3 days
 
-    def shift_if_busy(ts: pd.Timestamp) -> pd.Timestamp:
+    def shift_if_june23_to_25(ts: pd.Timestamp) -> pd.Timestamp:
+        """
+        If ts.date() is June 23, 24, or 25 2025, add exactly 3 days.
+        Otherwise, return ts unchanged.
+        """
         if pd.isna(ts):
             return ts
-        current_date = ts.date()
-        while busy_start <= current_date <= busy_end:
-            current_date += timedelta(days=1)
-        return pd.Timestamp(current_date)
+        d = ts.date()
+        if busy_start <= d <= busy_end:
+            return pd.Timestamp(d + timedelta(days=shift_amount))
+        return ts
 
-    melted["Date"] = melted["Date"].apply(shift_if_busy)
-
-    # ── Prevent multiple “Study Date” tasks on the same day ──
-    study_mask = melted["Task Type"] == "Study Date"
-    study_df = melted[study_mask].copy()
-    occupied = set()
-
-    for idx, row in study_df.sort_values("Date").iterrows():
-        d = row["Date"].date()
-        if d not in occupied:
-            occupied.add(d)
-        else:
-            candidate = d + timedelta(days=1)
-            while (busy_start <= candidate <= busy_end) or (candidate in occupied):
-                candidate += timedelta(days=1)
-            melted.at[idx, "Date"] = pd.Timestamp(candidate)
-            occupied.add(candidate)
-    # ────────────────────────────────────────────────────────
+    melted["Date"] = melted["Date"].apply(shift_if_june23_to_25)
+    # ────────────────────────────────────────────────────
 
     # ───────── Sidebar Controls ─────────
     st.sidebar.header("🔍 Filters")
@@ -130,7 +119,7 @@ if uploaded_file:
                 st.markdown("_No tasks_")
             else:
                 for idx, (task_type, topic) in enumerate(day_tasks):
-                    # Unique key for each checkbox
+                    # Unique key for each checkbox (date, type, topic, index)
                     key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
 
                     # Two mini‐columns: [checkbox] [pill+topic combined]
@@ -138,14 +127,14 @@ if uploaded_file:
                     with cb_col:
                         st.checkbox("", key=key)
                     with content_col:
-                        # Render pill and topic on the same horizontal line
+                        # Render pill + topic on one horizontal line
                         color = color_map.get(task_type, "#000000")
                         st.markdown(
                             f"<span style='background-color:{color};"
                             f" color:white; padding:2px 6px; border-radius:4px; "
-                            f"font-size:0.9em; vertical-align:middle; "
-                            f"display:inline-block;'>{task_type}</span>"
-                            f"&nbsp;{topic}",
+                            f"font-size:0.9em; display:inline-block;'>"
+                            f"{task_type}</span>"
+                            f"&nbsp;<span style='vertical-align:middle;'>{topic}</span>",
                             unsafe_allow_html=True,
                         )
 
