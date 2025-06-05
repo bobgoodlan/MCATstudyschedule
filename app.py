@@ -45,19 +45,20 @@ st.sidebar.header("⚙️ Shift & Display Settings")
 
 # --- 1) Conference Settings ---
 with st.sidebar.expander("📅 Conference Settings", expanded=False):
-    st.write("You can add multiple conference date ranges here. Any checked ‘Task Type’ falling in these ranges will be pushed forward.")
+    st.write("If you have any conference (busy) date ranges, set how many here. By default, this is zero.")
     n_conf = st.number_input(
-        "Number of Conference ranges", min_value=1, max_value=5, value=1, step=1
+        "Number of Conference ranges", min_value=0, max_value=5, value=0, step=1
     )
     conf_ranges = []
     for i in range(int(n_conf)):
+        # No hard‐coded default dates—leave blank for the user to fill.
         cr = st.date_input(
-            f"Conference range {i+1}:",
-            value=(datetime(2025, 6, 23).date(), datetime(2025, 6, 25).date()),
+            f"Conference range {i+1} (start, end):",
             key=f"conf_range_{i}",
         )
-        if not (isinstance(cr, tuple) and len(cr) == 2):
-            st.error(f"Select exactly two dates for conference range {i+1}.")
+        # `date_input` returns a single date if you don't pass `value=(start,end)`, so we force tuple logic:
+        if not isinstance(cr, tuple) or len(cr) != 2:
+            st.error(f"Select exactly two dates for Conference range {i+1}.")
             st.stop()
         conf_ranges.append(cr)
 
@@ -70,19 +71,18 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
 
 # --- 2) Vacation Settings ---
 with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
-    st.write("You can add multiple vacation date ranges here. Checked ‘Task Types’ in these ranges will be redistributed forward (max 6/day).")
+    st.write("If you have any vacation/missed date ranges, set how many here. By default, this is zero.")
     n_vac = st.number_input(
-        "Number of Vacation ranges", min_value=1, max_value=5, value=1, step=1
+        "Number of Vacation ranges", min_value=0, max_value=5, value=0, step=1
     )
     vac_ranges = []
     for i in range(int(n_vac)):
         vr = st.date_input(
-            f"Vacation range {i+1}:",
-            value=(datetime(2025, 5, 31).date(), datetime(2025, 6, 1).date()),
+            f"Vacation range {i+1} (start, end):",
             key=f"vac_range_{i}",
         )
-        if not (isinstance(vr, tuple) and len(vr) == 2):
-            st.error(f"Select exactly two dates for vacation range {i+1}.")
+        if not isinstance(vr, tuple) or len(vr) != 2:
+            st.error(f"Select exactly two dates for Vacation range {i+1}.")
             st.stop()
         vac_ranges.append(vr)
 
@@ -93,13 +93,13 @@ with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
         help="Only tasks whose type is checked here will be pulled off any date in vacation ranges and redistributed forward (max 6 tasks/day).",
     )
 
-# --- 3) Display Settings (with “Previous / Next Week”) ---
+# --- 3) Display Settings (with Week Navigation) ---
 with st.sidebar.expander("🔍 Display Settings", expanded=True):
-    # Initialize session_state for selected_date if needed
+    # Initialize session_state for selected_date if not already present
     if "selected_date" not in st.session_state:
         st.session_state["selected_date"] = datetime.today().date()
 
-    # Callback functions for the “Previous” / “Next” buttons
+    # Callback functions for Prev/Next Week
     def go_to_previous_week():
         st.session_state["selected_date"] -= timedelta(days=7)
 
@@ -112,14 +112,12 @@ with st.sidebar.expander("🔍 Display Settings", expanded=True):
     with col2:
         st.button("Next Week →", on_click=go_to_next_week)
 
-    # Bind the date_input widget to session_state["selected_date"]
     selected_date = st.date_input(
         "Select a date (to view that week):",
         value=st.session_state["selected_date"],
         key="selected_date",
     )
 
-    # Filters: Task Type + Topic keyword
     display_types = st.multiselect(
         "Show only these Task Types:",
         options=melted["Task Type"].unique().tolist(),
@@ -128,7 +126,7 @@ with st.sidebar.expander("🔍 Display Settings", expanded=True):
     search_topic = st.text_input("Search Topic")
 
 
-# Compute the week’s Monday → Sunday based on selected_date
+# ───────── Compute Week Bounds ─────────
 week_start = selected_date - timedelta(days=selected_date.weekday())
 week_days = [week_start + timedelta(days=i) for i in range(7)]
 
@@ -136,26 +134,28 @@ week_days = [week_start + timedelta(days=i) for i in range(7)]
 # ───────── Apply Shifting Logic ─────────
 df_shifted = melted.copy()
 
-def in_any_conf_range(date_obj, conf_list):
-    for start, end in conf_list:
+def in_any_range(date_obj, ranges_list):
+    """Return True if date_obj is in any of the (start, end) pairs in ranges_list."""
+    for start, end in ranges_list:
         if start <= date_obj <= end:
             return True
     return False
 
-# 1) Shift out of all Conference ranges
+# 1) Shift out of all Conference ranges (if any)
 for idx, row in df_shifted.iterrows():
     orig_date = row["Date"]
     ttype = row["Task Type"]
-    if (ttype in shift_conference_types) and in_any_conf_range(orig_date, conf_ranges):
+    if (ttype in shift_conference_types) and in_any_range(orig_date, conf_ranges):
         d = orig_date
-        while in_any_conf_range(d, conf_ranges):
-            d = d + timedelta(days=1)
+        # Keep shifting forward until date is no longer in any conf_range
+        while in_any_range(d, conf_ranges):
+            d += timedelta(days=1)
         df_shifted.at[idx, "Date"] = d
 
-# 2) Redistribute each Vacation range
+# 2) Redistribute each Vacation range, one by one (if any)
 vac_ranges_sorted = sorted(vac_ranges, key=lambda x: x[0])
-for vr in vac_ranges_sorted:
-    vr_start, vr_end = vr
+for vr_start, vr_end in vac_ranges_sorted:
+    # 2a) Find all indices that fall in this vacation window
     vac_indices = []
     for idx, row in df_shifted.iterrows():
         d = row["Date"]
@@ -163,36 +163,38 @@ for vr in vac_ranges_sorted:
         if (ttype in shift_vacation_types) and (vr_start <= d <= vr_end):
             vac_indices.append(idx)
 
+    # 2b) Count “occupied slots” for every date > vr_end
     slot_counts = defaultdict(int)
     for idx2, row2 in df_shifted.iterrows():
         d2 = row2["Date"]
         if d2 > vr_end:
             slot_counts[d2] += 1
 
+    # 2c) Re‐assign each vac_index to the first date > vr_end with < 6 tasks and not in a conference range
     for idx in sorted(vac_indices, key=lambda i: df_shifted.at[i, "Date"]):
         candidate = vr_end + timedelta(days=1)
-        while slot_counts[candidate] >= 6 or in_any_conf_range(candidate, conf_ranges):
+        while slot_counts[candidate] >= 6 or in_any_range(candidate, conf_ranges):
             candidate += timedelta(days=1)
         df_shifted.at[idx, "Date"] = candidate
         slot_counts[candidate] += 1
 
-# 3) Avoid collisions among “Study Date” if shifted
+# 3) Avoid collisions among “Study Date” if that type was in shift_conference_types
 if "Study Date" in shift_conference_types:
     study_rows = df_shifted[df_shifted["Task Type"] == "Study Date"].copy()
     occupied = set()
     for idx, row in study_rows.sort_values("Date").iterrows():
         d = row["Date"]
-        if d not in occupied and not in_any_conf_range(d, conf_ranges):
+        if (d not in occupied) and not in_any_range(d, conf_ranges):
             occupied.add(d)
         else:
             candidate = d + timedelta(days=1)
-            while (candidate in occupied) or in_any_conf_range(candidate, conf_ranges):
+            while (candidate in occupied) or in_any_range(candidate, conf_ranges):
                 candidate += timedelta(days=1)
             df_shifted.at[idx, "Date"] = candidate
             occupied.add(candidate)
 
 
-# ───────── Filter & Group for Display ─────────
+# ───────── Filtered DataFrame for Display ─────────
 filtered = df_shifted[df_shifted["Task Type"].isin(display_types)].copy()
 if search_topic:
     filtered = filtered[filtered["Topic"].str.contains(search_topic, case=False, na=False)]
@@ -202,7 +204,7 @@ for _, row in filtered.iterrows():
     tasks_by_day[row["Date"]].append((row["Task Type"], row["Topic"]))
 
 
-# ───────── “Clear Completions” Button ─────────
+# ───────── Helper: Clear All Completions This Week ─────────
 if st.button("🧹 Clear Completions for This Week"):
     for day in week_days:
         day_tasks = tasks_by_day.get(day, [])
@@ -227,9 +229,8 @@ color_map = {
 
 
 # ───────── Render the Weekly View ─────────
-
-# 1) Compute the total number of remaining (unchecked) tasks for this week
 total_remaining = 0
+
 for day in week_days:
     day_tasks = tasks_by_day.get(day, [])
     for idx, (ttype, topic) in enumerate(day_tasks):
@@ -238,18 +239,20 @@ for day in week_days:
         if not completed:
             total_remaining += 1
 
-# 2) Display the header with only the total count
+# 1) Header: Total tasks remaining
 st.markdown(
     f"<h2 style='margin-bottom:10px;'>Total tasks remaining this week: {total_remaining}</h2>",
     unsafe_allow_html=True,
 )
 st.markdown("<h3>📆 Weekly View</h3>", unsafe_allow_html=True)
 
-# 3) Render each day in a 7-column grid
+if total_remaining == 0:
+    st.info("🎉 All tasks for this week are completed!")
+
+# 2) Draw 7‐column grid for each day
 cols = st.columns(7)
 for i, day in enumerate(week_days):
     with cols[i]:
-        # Day header
         st.markdown(
             f"<div style='margin-bottom:12px;'>"
             f"<strong>{calendar.day_name[day.weekday()]}</strong><br>"
@@ -271,7 +274,7 @@ for i, day in enumerate(week_days):
 
                 color = color_map.get(task_type, "#000000")
                 if not completed:
-                    # Normal pill + topic
+                    # Normal rendering
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:{color}; color:white; "
@@ -289,7 +292,7 @@ for i, day in enumerate(week_days):
                     )
                     st.markdown(topic_html, unsafe_allow_html=True)
                 else:
-                    # Strikethrough + gray for completed tasks
+                    # Strikethrough & gray for completed
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:lightgray; color:#666666; "
