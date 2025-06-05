@@ -93,23 +93,31 @@ with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
         help="Only tasks whose type is checked here will be pulled off any date in vacation ranges and redistributed forward (max 6 tasks/day).",
     )
 
-# --- 3) Display Settings ---
+# --- 3) Display Settings (with “Previous/Next Week” fixed) ---
 with st.sidebar.expander("🔍 Display Settings", expanded=True):
-    # Week selector + prev/next buttons
-    selected_date = st.date_input(
-        "Select a date (to view that week):", value=datetime.today().date()
-    )
-    # Prev / Next Week Buttons
+    # Initialize session state for selected_date if not already present
+    if "selected_date" not in st.session_state:
+        st.session_state.selected_date = datetime.today().date()
+
+    # Previous / Next Week Buttons
+    # NOTE: These modify st.session_state["selected_date"] and then force a rerun.
     col1, col2 = st.columns([1, 1])
     with col1:
         if st.button("← Previous Week"):
-            selected_date = selected_date - timedelta(days=7)
-            # force rerun with a new key
+            st.session_state.selected_date -= timedelta(days=7)
             st.experimental_rerun()
     with col2:
         if st.button("Next Week →"):
-            selected_date = selected_date + timedelta(days=7)
+            st.session_state.selected_date += timedelta(days=7)
             st.experimental_rerun()
+
+    # The date_input itself, bound to session_state["selected_date"]:
+    #   - If you pick a new date manually, it updates session_state too.
+    selected_date = st.date_input(
+        "Select a date (to view that week):",
+        value=st.session_state.selected_date,
+        key="selected_date",
+    )
 
     # Filters: Task Type + Topic keyword
     display_types = st.multiselect(
@@ -120,7 +128,7 @@ with st.sidebar.expander("🔍 Display Settings", expanded=True):
     search_topic = st.text_input("Search Topic")
 
 
-# Compute the week (Monday → Sunday) that contains `selected_date`
+# Now that we have a stable `selected_date` in session_state, compute the week bounds
 week_start = selected_date - timedelta(days=selected_date.weekday())
 week_days = [week_start + timedelta(days=i) for i in range(7)]
 
@@ -128,31 +136,26 @@ week_days = [week_start + timedelta(days=i) for i in range(7)]
 # ───────── Apply Shifting Logic ─────────
 df_shifted = melted.copy()
 
-# 1) Shift out of all Conference ranges (only for selected types)
 def in_any_conf_range(date_obj, conf_list):
     for start, end in conf_list:
         if start <= date_obj <= end:
             return True
     return False
 
+# 1) Shift out of all Conference ranges
 for idx, row in df_shifted.iterrows():
     orig_date = row["Date"]
     ttype = row["Task Type"]
     if (ttype in shift_conference_types) and in_any_conf_range(orig_date, conf_ranges):
         d = orig_date
-        # Push until no longer in any conf range
         while in_any_conf_range(d, conf_ranges):
             d = d + timedelta(days=1)
         df_shifted.at[idx, "Date"] = d
 
-# 2) Redistribute each Vacation range in chronological order
-#    (max 6 tasks per day, only for selected types)
-# Sort vac_ranges by start date to process earliest first
+# 2) Redistribute each Vacation range one by one
 vac_ranges_sorted = sorted(vac_ranges, key=lambda x: x[0])
-
 for vr in vac_ranges_sorted:
     vr_start, vr_end = vr
-    # 2a) Identify tasks in THIS vacation range that need to be moved
     vac_indices = []
     for idx, row in df_shifted.iterrows():
         d = row["Date"]
@@ -160,14 +163,12 @@ for vr in vac_ranges_sorted:
         if (ttype in shift_vacation_types) and (vr_start <= d <= vr_end):
             vac_indices.append(idx)
 
-    # 2b) Build a fresh count of “occupied slots” for dates AFTER vr_end
     slot_counts = defaultdict(int)
     for idx2, row2 in df_shifted.iterrows():
         d2 = row2["Date"]
         if d2 > vr_end:
             slot_counts[d2] += 1
 
-    # 2c) Redistribute each “vacation” task for THIS range
     for idx in sorted(vac_indices, key=lambda i: df_shifted.at[i, "Date"]):
         candidate = vr_end + timedelta(days=1)
         while slot_counts[candidate] >= 6 or in_any_conf_range(candidate, conf_ranges):
@@ -175,8 +176,7 @@ for vr in vac_ranges_sorted:
         df_shifted.at[idx, "Date"] = candidate
         slot_counts[candidate] += 1
 
-
-# 3) Avoid collisions among “Study Date” (only if “Study Date” was in shift_conference_types)
+# 3) Avoid collisions among “Study Date” if that type was shifted
 if "Study Date" in shift_conference_types:
     study_rows = df_shifted[df_shifted["Task Type"] == "Study Date"].copy()
     occupied = set()
@@ -197,7 +197,6 @@ filtered = df_shifted[df_shifted["Task Type"].isin(display_types)].copy()
 if search_topic:
     filtered = filtered[filtered["Topic"].str.contains(search_topic, case=False, na=False)]
 
-# Group tasks by date (for the entire dataset, but we'll only render the selected week)
 tasks_by_day = defaultdict(list)
 for _, row in filtered.iterrows():
     tasks_by_day[row["Date"]].append((row["Task Type"], row["Topic"]))
@@ -216,19 +215,18 @@ if st.button("🧹 Clear Completions for This Week"):
 
 # ───────── Color Map for Task Types ─────────
 color_map = {
-    "Study Date":    "#1f77b4",  # blue
-    "1-Day Review":  "#ff7f0e",  # orange
-    "3-Day Review":  "#2ca02c",  # green
-    "7-Day Review":  "#d62728",  # red
-    "14-Day Review": "#9467bd",  # purple
-    "30-Day Review": "#8c564b",  # brown
-    "60-Day Review": "#e377c2",  # pink
-    "Final Review":  "#7f7f7f",  # gray
+    "Study Date":    "#1f77b4",
+    "1-Day Review":  "#ff7f0e",
+    "3-Day Review":  "#2ca02c",
+    "7-Day Review":  "#d62728",
+    "14-Day Review": "#9467bd",
+    "30-Day Review": "#8c564b",
+    "60-Day Review": "#e377c2",
+    "Final Review":  "#7f7f7f",
 }
 
 
 # ───────── Render the Weekly View ─────────
-# 1) First, compute how many tasks remain (unchecked) in this week
 remaining_by_type = defaultdict(int)
 total_remaining = 0
 
@@ -241,14 +239,12 @@ for day in week_days:
             remaining_by_type[ttype] += 1
             total_remaining += 1
 
-# 2) Display the header
 st.markdown(
     f"<h2 style='margin-bottom:10px;'>Total tasks remaining this week: {total_remaining}</h2>",
     unsafe_allow_html=True,
 )
 st.markdown("<h3>📆 Weekly View</h3>", unsafe_allow_html=True)
 
-# 3) Show a per-Type count table (only for types that have >0)
 if total_remaining > 0:
     cnt_cols = st.columns(len(remaining_by_type))
     for (ttype, cnt), col in zip(remaining_by_type.items(), cnt_cols):
@@ -262,11 +258,9 @@ if total_remaining > 0:
 else:
     st.info("🎉 All tasks for this week are completed!")
 
-# 4) Render each day in a 7‐column grid
 cols = st.columns(7)
 for i, day in enumerate(week_days):
     with cols[i]:
-        # Day header
         st.markdown(
             f"<div style='margin-bottom:12px;'>"
             f"<strong>{calendar.day_name[day.weekday()]}</strong><br>"
@@ -282,15 +276,12 @@ for i, day in enumerate(week_days):
                 unsafe_allow_html=True,
             )
         else:
-            # For each task: show checkbox + pill + topic. If checked, render with strikethrough & gray.
             for idx, (task_type, topic) in enumerate(day_tasks):
                 key = f"cb_{day.isoformat()}_{task_type}_{topic}_{idx}"
-                # The checkbox itself; default=False if not in session_state
                 completed = st.checkbox("", key=key)
 
                 color = color_map.get(task_type, "#000000")
                 if not completed:
-                    # Normal pill & topic
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:{color}; color:white; "
@@ -308,7 +299,6 @@ for i, day in enumerate(week_days):
                     )
                     st.markdown(topic_html, unsafe_allow_html=True)
                 else:
-                    # Strikethrough + gray for completed tasks
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:lightgray; color:#666666; "
