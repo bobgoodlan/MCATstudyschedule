@@ -43,7 +43,7 @@ melted["Date"] = pd.to_datetime(melted["Date"]).dt.date
 # ───────── Sidebar: All Settings (in Expanders) ─────────
 st.sidebar.header("⚙️ Shift & Display Settings")
 
-# --- 1) Conference Settings ---
+# --- 1) Conference Settings (no change) ---
 with st.sidebar.expander("📅 Conference Settings", expanded=False):
     st.write("You can add multiple conference date ranges here. Any checked ‘Task Type’ falling in these ranges will be pushed forward.")
     n_conf = st.number_input(
@@ -67,6 +67,67 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
         default=["Study Date"],
         help="Only tasks whose type is checked here will move if they land in any Conference range.",
     )
+
+# --- 2) Vacation Settings (no change) ---
+with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
+    st.write("You can add multiple vacation date ranges here. Checked ‘Task Types’ in these ranges will be redistributed forward (max 6/day).")
+    n_vac = st.number_input(
+        "Number of Vacation ranges", min_value=1, max_value=5, value=1, step=1
+    )
+    vac_ranges = []
+    for i in range(int(n_vac)):
+        vr = st.date_input(
+            f"Vacation range {i+1}:",
+            value=(datetime(2025, 5, 31).date(), datetime(2025, 6, 1).date()),
+            key=f"vac_range_{i}",
+        )
+        if not (isinstance(vr, tuple) and len(vr) == 2):
+            st.error(f"Select exactly two dates for vacation range {i+1}.")
+            st.stop()
+        vac_ranges.append(vr)
+
+    shift_vacation_types = st.multiselect(
+        "Which Task Types to redistribute from Vacation days?",
+        options=melted["Task Type"].unique().tolist(),
+        default=[t for t in melted["Task Type"].unique() if "Review" in t],
+        help="Only tasks whose type is checked here will be pulled off any date in vacation ranges and redistributed forward (max 6 tasks/day).",
+    )
+
+# --- 3) Display Settings (with “Previous / Next Week” fixed) ---
+with st.sidebar.expander("🔍 Display Settings", expanded=True):
+    # 3a) Initialize session_state for selected_date if not already present
+    if "selected_date" not in st.session_state:
+        st.session_state["selected_date"] = datetime.today().date()
+
+    # 3b) Define callback functions for the two buttons
+    def go_to_previous_week():
+        st.session_state["selected_date"] -= timedelta(days=7)
+
+    def go_to_next_week():
+        st.session_state["selected_date"] += timedelta(days=7)
+
+    # 3c) Render the two buttons with on_click callbacks
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.button("← Previous Week", on_click=go_to_previous_week)
+    with col2:
+        st.button("Next Week →", on_click=go_to_next_week)
+
+    # 3d) Render the date_input bound to session_state
+    selected_date = st.date_input(
+        "Select a date (to view that week):",
+        value=st.session_state["selected_date"],
+        key="selected_date",
+    )
+
+    # 3e) Filters: Task Type + Topic keyword
+    display_types = st.multiselect(
+        "Show only these Task Types:",
+        options=melted["Task Type"].unique().tolist(),
+        default=melted["Task Type"].unique().tolist(),
+    )
+    search_topic = st.text_input("Search Topic")
+
 
 # --- 2) Vacation Settings ---
 with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
