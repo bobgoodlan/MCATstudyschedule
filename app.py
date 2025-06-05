@@ -43,7 +43,7 @@ melted["Date"] = pd.to_datetime(melted["Date"]).dt.date
 # ───────── Sidebar: All Settings (in Expanders) ─────────
 st.sidebar.header("⚙️ Shift & Display Settings")
 
-# --- 1) Conference Settings (no change) ---
+# --- 1) Conference Settings ---
 with st.sidebar.expander("📅 Conference Settings", expanded=False):
     st.write("You can add multiple conference date ranges here. Any checked ‘Task Type’ falling in these ranges will be pushed forward.")
     n_conf = st.number_input(
@@ -67,67 +67,6 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
         default=["Study Date"],
         help="Only tasks whose type is checked here will move if they land in any Conference range.",
     )
-
-# --- 2) Vacation Settings (no change) ---
-with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
-    st.write("You can add multiple vacation date ranges here. Checked ‘Task Types’ in these ranges will be redistributed forward (max 6/day).")
-    n_vac = st.number_input(
-        "Number of Vacation ranges", min_value=1, max_value=5, value=1, step=1
-    )
-    vac_ranges = []
-    for i in range(int(n_vac)):
-        vr = st.date_input(
-            f"Vacation range {i+1}:",
-            value=(datetime(2025, 5, 31).date(), datetime(2025, 6, 1).date()),
-            key=f"vac_range_{i}",
-        )
-        if not (isinstance(vr, tuple) and len(vr) == 2):
-            st.error(f"Select exactly two dates for vacation range {i+1}.")
-            st.stop()
-        vac_ranges.append(vr)
-
-    shift_vacation_types = st.multiselect(
-        "Which Task Types to redistribute from Vacation days?",
-        options=melted["Task Type"].unique().tolist(),
-        default=[t for t in melted["Task Type"].unique() if "Review" in t],
-        help="Only tasks whose type is checked here will be pulled off any date in vacation ranges and redistributed forward (max 6 tasks/day).",
-    )
-
-# --- 3) Display Settings (with “Previous / Next Week” fixed) ---
-with st.sidebar.expander("🔍 Display Settings", expanded=True):
-    # 3a) Initialize session_state for selected_date if not already present
-    if "selected_date" not in st.session_state:
-        st.session_state["selected_date"] = datetime.today().date()
-
-    # 3b) Define callback functions for the two buttons
-    def go_to_previous_week():
-        st.session_state["selected_date"] -= timedelta(days=7)
-
-    def go_to_next_week():
-        st.session_state["selected_date"] += timedelta(days=7)
-
-    # 3c) Render the two buttons with on_click callbacks
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.button("← Previous Week", on_click=go_to_previous_week)
-    with col2:
-        st.button("Next Week →", on_click=go_to_next_week)
-
-    # 3d) Render the date_input bound to session_state
-    selected_date = st.date_input(
-        "Select a date (to view that week):",
-        value=st.session_state["selected_date"],
-        key="selected_date",
-    )
-
-    # 3e) Filters: Task Type + Topic keyword
-    display_types = st.multiselect(
-        "Show only these Task Types:",
-        options=melted["Task Type"].unique().tolist(),
-        default=melted["Task Type"].unique().tolist(),
-    )
-    search_topic = st.text_input("Search Topic")
-
 
 # --- 2) Vacation Settings ---
 with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
@@ -154,29 +93,29 @@ with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
         help="Only tasks whose type is checked here will be pulled off any date in vacation ranges and redistributed forward (max 6 tasks/day).",
     )
 
-# --- 3) Display Settings (with “Previous/Next Week” fixed) ---
+# --- 3) Display Settings (with “Previous / Next Week”) ---
 with st.sidebar.expander("🔍 Display Settings", expanded=True):
-    # Initialize session state for selected_date if not already present
+    # Initialize session_state for selected_date if needed
     if "selected_date" not in st.session_state:
-        st.session_state.selected_date = datetime.today().date()
+        st.session_state["selected_date"] = datetime.today().date()
 
-    # Previous / Next Week Buttons
-    # NOTE: These modify st.session_state["selected_date"] and then force a rerun.
+    # Callback functions for the “Previous” / “Next” buttons
+    def go_to_previous_week():
+        st.session_state["selected_date"] -= timedelta(days=7)
+
+    def go_to_next_week():
+        st.session_state["selected_date"] += timedelta(days=7)
+
     col1, col2 = st.columns([1, 1])
     with col1:
-        if st.button("← Previous Week"):
-            st.session_state.selected_date -= timedelta(days=7)
-            st.experimental_rerun()
+        st.button("← Previous Week", on_click=go_to_previous_week)
     with col2:
-        if st.button("Next Week →"):
-            st.session_state.selected_date += timedelta(days=7)
-            st.experimental_rerun()
+        st.button("Next Week →", on_click=go_to_next_week)
 
-    # The date_input itself, bound to session_state["selected_date"]:
-    #   - If you pick a new date manually, it updates session_state too.
+    # Bind the date_input widget to session_state["selected_date"]
     selected_date = st.date_input(
         "Select a date (to view that week):",
-        value=st.session_state.selected_date,
+        value=st.session_state["selected_date"],
         key="selected_date",
     )
 
@@ -189,7 +128,7 @@ with st.sidebar.expander("🔍 Display Settings", expanded=True):
     search_topic = st.text_input("Search Topic")
 
 
-# Now that we have a stable `selected_date` in session_state, compute the week bounds
+# Compute the week’s Monday → Sunday based on selected_date
 week_start = selected_date - timedelta(days=selected_date.weekday())
 week_days = [week_start + timedelta(days=i) for i in range(7)]
 
@@ -213,7 +152,7 @@ for idx, row in df_shifted.iterrows():
             d = d + timedelta(days=1)
         df_shifted.at[idx, "Date"] = d
 
-# 2) Redistribute each Vacation range one by one
+# 2) Redistribute each Vacation range
 vac_ranges_sorted = sorted(vac_ranges, key=lambda x: x[0])
 for vr in vac_ranges_sorted:
     vr_start, vr_end = vr
@@ -237,7 +176,7 @@ for vr in vac_ranges_sorted:
         df_shifted.at[idx, "Date"] = candidate
         slot_counts[candidate] += 1
 
-# 3) Avoid collisions among “Study Date” if that type was shifted
+# 3) Avoid collisions among “Study Date” if shifted
 if "Study Date" in shift_conference_types:
     study_rows = df_shifted[df_shifted["Task Type"] == "Study Date"].copy()
     occupied = set()
@@ -253,7 +192,7 @@ if "Study Date" in shift_conference_types:
             occupied.add(candidate)
 
 
-# ───────── Filtered DataFrame for Display ─────────
+# ───────── Filter & Group for Display ─────────
 filtered = df_shifted[df_shifted["Task Type"].isin(display_types)].copy()
 if search_topic:
     filtered = filtered[filtered["Topic"].str.contains(search_topic, case=False, na=False)]
@@ -263,7 +202,7 @@ for _, row in filtered.iterrows():
     tasks_by_day[row["Date"]].append((row["Task Type"], row["Topic"]))
 
 
-# ───────── Helper: Reset All Completions for Current Week ─────────
+# ───────── “Clear Completions” Button ─────────
 if st.button("🧹 Clear Completions for This Week"):
     for day in week_days:
         day_tasks = tasks_by_day.get(day, [])
@@ -288,40 +227,29 @@ color_map = {
 
 
 # ───────── Render the Weekly View ─────────
-remaining_by_type = defaultdict(int)
-total_remaining = 0
 
+# 1) Compute the total number of remaining (unchecked) tasks for this week
+total_remaining = 0
 for day in week_days:
     day_tasks = tasks_by_day.get(day, [])
     for idx, (ttype, topic) in enumerate(day_tasks):
         key = f"cb_{day.isoformat()}_{ttype}_{topic}_{idx}"
         completed = st.session_state.get(key, False)
         if not completed:
-            remaining_by_type[ttype] += 1
             total_remaining += 1
 
+# 2) Display the header with only the total count
 st.markdown(
     f"<h2 style='margin-bottom:10px;'>Total tasks remaining this week: {total_remaining}</h2>",
     unsafe_allow_html=True,
 )
 st.markdown("<h3>📆 Weekly View</h3>", unsafe_allow_html=True)
 
-if total_remaining > 0:
-    cnt_cols = st.columns(len(remaining_by_type))
-    for (ttype, cnt), col in zip(remaining_by_type.items(), cnt_cols):
-        with col:
-            st.markdown(
-                f"<div style='background-color:{color_map.get(ttype,'#cccccc')}; "
-                f"color:white; padding:8px; border-radius:4px; text-align:center;'>"
-                f"<strong>{ttype}</strong><br>{cnt} left</div>",
-                unsafe_allow_html=True,
-            )
-else:
-    st.info("🎉 All tasks for this week are completed!")
-
+# 3) Render each day in a 7-column grid
 cols = st.columns(7)
 for i, day in enumerate(week_days):
     with cols[i]:
+        # Day header
         st.markdown(
             f"<div style='margin-bottom:12px;'>"
             f"<strong>{calendar.day_name[day.weekday()]}</strong><br>"
@@ -343,6 +271,7 @@ for i, day in enumerate(week_days):
 
                 color = color_map.get(task_type, "#000000")
                 if not completed:
+                    # Normal pill + topic
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:{color}; color:white; "
@@ -360,6 +289,7 @@ for i, day in enumerate(week_days):
                     )
                     st.markdown(topic_html, unsafe_allow_html=True)
                 else:
+                    # Strikethrough + gray for completed tasks
                     pill_html = (
                         f"<div style='display:inline-block; "
                         f"background-color:lightgray; color:#666666; "
