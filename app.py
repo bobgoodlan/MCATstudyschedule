@@ -51,16 +51,25 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
     )
     conf_ranges = []
     for i in range(int(n_conf)):
-        # No hard‐coded default dates—leave blank for the user to fill.
+        # Provide a dummy tuple so the widget renders as a range picker
+        default_start = datetime.today().date()
+        default_end = default_start + timedelta(days=1)
+
         cr = st.date_input(
             f"Conference range {i+1} (start, end):",
+            value=(default_start, default_end),
             key=f"conf_range_{i}",
         )
-        # `date_input` returns a single date if you don't pass `value=(start,end)`, so we force tuple logic:
         if not isinstance(cr, tuple) or len(cr) != 2:
             st.error(f"Select exactly two dates for Conference range {i+1}.")
             st.stop()
-        conf_ranges.append(cr)
+
+        start_date, end_date = cr
+        if end_date < start_date:
+            st.error(f"End date must be on or after start date for range {i+1}.")
+            st.stop()
+
+        conf_ranges.append((start_date, end_date))
 
     shift_conference_types = st.multiselect(
         "Which Task Types to shift out of Conference days?",
@@ -77,14 +86,24 @@ with st.sidebar.expander("🏖️ Vacation Settings", expanded=False):
     )
     vac_ranges = []
     for i in range(int(n_vac)):
+        default_start = datetime.today().date()
+        default_end = default_start + timedelta(days=1)
+
         vr = st.date_input(
             f"Vacation range {i+1} (start, end):",
+            value=(default_start, default_end),
             key=f"vac_range_{i}",
         )
         if not isinstance(vr, tuple) or len(vr) != 2:
             st.error(f"Select exactly two dates for Vacation range {i+1}.")
             st.stop()
-        vac_ranges.append(vr)
+
+        vac_start, vac_end = vr
+        if vac_end < vac_start:
+            st.error(f"End date must be on or after start date for range {i+1}.")
+            st.stop()
+
+        vac_ranges.append((vac_start, vac_end))
 
     shift_vacation_types = st.multiselect(
         "Which Task Types to redistribute from Vacation days?",
