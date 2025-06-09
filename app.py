@@ -12,7 +12,7 @@ st.title("📚 Study Schedule Weekly Planner")
 def generate_tasks():
     tasks = []
     # 1) Daily practice questions: 40 Practice Questions per day from July 30 - August 31
-    start_practice = date(2025, 7, 30)
+    start_practice = date(2025, 7, 01)
     end_practice = date(2025, 8, 31)
     current = start_practice
     while current <= end_practice:
