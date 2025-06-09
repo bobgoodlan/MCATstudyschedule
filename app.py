@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from collections import defaultdict
 import calendar
 
@@ -8,6 +8,34 @@ import calendar
 st.set_page_config(page_title="Study Schedule Calendar", layout="wide")
 st.title("📚 Study Schedule Weekly Planner")
 
+# ───────── Helper: generate additional tasks ─────────
+def generate_tasks():
+    tasks = []
+    # 1) Daily practice questions from UWORLD: 40 questions/day from July 30 - August 31
+    start_practice = date(2025, 7, 30)
+    end_practice = date(2025, 8, 31)
+    current = start_practice
+    while current <= end_practice:
+        tasks.append({
+            "Topic": "UWORLD - mixed subjects (40 questions)",
+            "Task Type": "Practice Questions",
+            "Date": current,
+        })
+        current += timedelta(days=1)
+
+    # 2) Weekly full-length exams every Monday from July 7 - August 25
+    start_fl = date(2025, 7, 7)
+    end_fl = date(2025, 8, 25)
+    current = start_fl
+    while current <= end_fl:
+        tasks.append({
+            "Topic": "Full Length MCAT Exam",  
+            "Task Type": "Full Length Exam",
+            "Date": current,
+        })
+        current += timedelta(weeks=1)
+
+    return pd.DataFrame(tasks)
 
 # ───────── Upload Excel File ─────────
 uploaded_file = st.file_uploader("Upload your MCAT Study Schedule Excel file", type=["xlsx"])
@@ -39,6 +67,13 @@ melted = pd.melt(
 melted = melted.dropna(subset=["Date"]).copy()
 melted["Date"] = pd.to_datetime(melted["Date"]).dt.date
 
+# ───────── Append generated tasks ─────────
+generated = generate_tasks()
+# Ensure correct dtypes
+if not generated.empty:
+    generated["Date"] = pd.to_datetime(generated["Date"]).dt.date
+    # Append to our melted schedule
+    melted = pd.concat([melted, generated], ignore_index=True)
 
 # ───────── Sidebar: All Settings (in Expanders) ─────────
 st.sidebar.header("⚙️ Shift & Display Settings")
@@ -51,7 +86,6 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
     )
     conf_ranges = []
     for i in range(int(n_conf)):
-        # Provide a dummy tuple so the widget renders as a range picker
         default_start = datetime.today().date()
         default_end = default_start + timedelta(days=1)
 
@@ -73,7 +107,7 @@ with st.sidebar.expander("📅 Conference Settings", expanded=False):
 
     shift_conference_types = st.multiselect(
         "Which Task Types to shift out of Conference days?",
-        options=melted["Task Type"].unique().tolist(),
+        options=melted['Task Type'].unique().tolist(),
         default=["Study Date"],
         help="Only tasks whose type is checked here will move if they land in any Conference range.",
     )
