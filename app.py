@@ -195,6 +195,15 @@ color_map = {
     "Full Length Exam": "#4361ee",
 }
 
+# ───────── Celebrate MCAT Test Week ─────────
+mcat_test_date = date(2025, 9, 4)
+if week_start <= mcat_test_date <= week_start + timedelta(days=6):
+    st.markdown(
+        "<div style='background-color:#06d6a0; color:white; padding:16px; border-radius:10px; font-size:1.2em; margin-bottom:20px;'>"
+        "🎉 <strong>It's MCAT Week!</strong> Your test is on <strong>September 4</strong> — you've got this! Time to shine! ✨</div>",
+        unsafe_allow_html=True,
+    )
+
 # ───────── Render Weekly View ─────────
 total_remaining = 0
 for day in week_days:
