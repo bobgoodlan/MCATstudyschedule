@@ -50,16 +50,27 @@ def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
 
 # ───────── Build Schedule DataFrame ─────────
 schedule = generate_spaced_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
-df = pd.DataFrame(schedule)
-df.set_index("Date", inplace=True)
+df = pd.DataFrame(schedule).set_index("Date")
 
-# ───────── Display Schedule ─────────
+# ───────── Compute Average Spacing ─────────
+# Melt to long form for diff calculation
+long_df = df.reset_index().melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)], var_name="Position", value_name="Topic")
+# Group by topic and compute gaps
+gaps = []
+for topic, group in long_df.groupby("Topic"):
+    dates = group["Date"].sort_values()
+    deltas = dates.diff().dt.days.dropna()
+    gaps.extend(deltas.tolist())
+# Overall average gap
+avg_gap = sum(gaps) / len(gaps) if gaps else 0
+
+# ───────── Display Schedule and Metrics ─────────
 st.subheader(f"Spaced Review: {START_DATE.strftime('%b %d, %Y')} → {END_DATE.strftime('%b %d, %Y')}")
+st.markdown(f"**Average spacing between topic reviews:** {avg_gap:.1f} days")
 st.dataframe(df)
 
 # ───────── Export to Excel ─────────
 buffer = io.BytesIO()
-# Use openpyxl engine (ensure openpyxl is installed)
 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
     df.to_excel(writer, sheet_name="Spaced Review")
 buffer.seek(0)
