@@ -47,7 +47,8 @@ schedule = generate_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
 
 df = pd.DataFrame(schedule)
 df.set_index("Date", inplace=True)
-\# ───────── Display Schedule ─────────
+
+# ───────── Display Schedule ─────────
 st.subheader(f"Review Schedule: {START_DATE.strftime('%b %d, %Y')} – {END_DATE.strftime('%b %d, %Y')}")
 st.dataframe(df)
 
