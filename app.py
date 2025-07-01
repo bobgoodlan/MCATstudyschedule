@@ -35,7 +35,7 @@ def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
         # Randomize order for tie-breaking on equal last_seen
         pool = topics.copy()
         random.shuffle(pool)
-        # Sort by ascending last_seen date -> topics not reviewed recently come first
+        # Sort by ascending last_seen date
         pool.sort(key=lambda t: last_seen[t])
         today_topics = pool[:per_day]
         # Update last_seen
@@ -48,25 +48,24 @@ def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
         schedule.append(entry)
     return schedule
 
-# Generate schedule
+# ───────── Build Schedule DataFrame ─────────
 schedule = generate_spaced_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
-
-# Build DataFrame
 df = pd.DataFrame(schedule)
 df.set_index("Date", inplace=True)
 
-# ───────── Display & Download ─────────
+# ───────── Display Schedule ─────────
 st.subheader(f"Spaced Review: {START_DATE.strftime('%b %d, %Y')} → {END_DATE.strftime('%b %d, %Y')}")
 st.dataframe(df)
 
-# Export to Excel
+# ───────── Export to Excel ─────────
 buffer = io.BytesIO()
-with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+# Use openpyxl engine (ensure openpyxl is installed)
+with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
     df.to_excel(writer, sheet_name="Spaced Review")
 buffer.seek(0)
 
 st.download_button(
-    "📥 Export to Excel",
+    label="📥 Export to Excel",
     data=buffer,
     file_name="spaced_daily_review_schedule.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
