@@ -5,8 +5,8 @@ import random
 import io
 
 # ───────── Page Configuration ─────────
-st.set_page_config(page_title="📆 Daily Topic Review", layout="wide")
-st.title("📚 Daily Topic Review Schedule")
+st.set_page_config(page_title="📆 Spaced Daily Topic Review", layout="wide")
+st.title("📚 Spaced Daily Topic Review Schedule")
 
 # ───────── Fixed Topics List ─────────
 TOPICS = [
@@ -23,44 +23,51 @@ START_DATE = date(2025, 7, 8)
 END_DATE = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
 
-# ───────── Generate Schedule ─────────
+# ───────── Generate Spaced Schedule ─────────
 @st.cache_data
-def generate_schedule(topics, start_dt, end_dt, per_day):
-    days = (end_dt - start_dt).days + 1
-    pool = topics.copy()
-    random.shuffle(pool)
+def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
+    total_days = (end_dt - start_dt).days + 1
+    # Initialize last-seen dates far in the past
+    last_seen = {t: start_dt - timedelta(days=total_days) for t in topics}
     schedule = []
-    for offset in range(days):
-        # Refill and reshuffle if not enough topics
-        if len(pool) < per_day:
-            pool = topics.copy()
-            random.shuffle(pool)
+    for day_offset in range(total_days):
+        current_date = start_dt + timedelta(days=day_offset)
+        # Randomize order for tie-breaking on equal last_seen
+        pool = topics.copy()
+        random.shuffle(pool)
+        # Sort by ascending last_seen date -> topics not reviewed recently come first
+        pool.sort(key=lambda t: last_seen[t])
         today_topics = pool[:per_day]
-        pool = pool[per_day:]
-        schedule.append({
-            "Date": start_dt + timedelta(days=offset),
-            **{f"Topic {i+1}": topic for i, topic in enumerate(today_topics)}
-        })
+        # Update last_seen
+        for t in today_topics:
+            last_seen[t] = current_date
+        # Record schedule
+        entry = {"Date": current_date}
+        for i, topic in enumerate(today_topics, start=1):
+            entry[f"Topic {i}"] = topic
+        schedule.append(entry)
     return schedule
 
-schedule = generate_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
+# Generate schedule
+schedule = generate_spaced_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
 
+# Build DataFrame
 df = pd.DataFrame(schedule)
 df.set_index("Date", inplace=True)
 
-# ───────── Display Schedule ─────────
-st.subheader(f"Review Schedule: {START_DATE.strftime('%b %d, %Y')} – {END_DATE.strftime('%b %d, %Y')}")
+# ───────── Display & Download ─────────
+st.subheader(f"Spaced Review: {START_DATE.strftime('%b %d, %Y')} → {END_DATE.strftime('%b %d, %Y')}")
 st.dataframe(df)
 
-# ───────── Download as Excel ─────────
-output = io.BytesIO()
-with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-    df.to_excel(writer, sheet_name="Review Schedule")
-output.seek(0)
+# Export to Excel
+buffer = io.BytesIO()
+with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+    df.to_excel(writer, sheet_name="Spaced Review")
+buffer.seek(0)
 
 st.download_button(
-    label="📥 Download Schedule as Excel",
-    data=output,
-    file_name="daily_review_schedule.xlsx",
+    "📥 Export to Excel",
+    data=buffer,
+    file_name="spaced_daily_review_schedule.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
