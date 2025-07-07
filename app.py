@@ -20,37 +20,47 @@ TOPICS = [
 
 # ───────── Schedule Parameters ─────────
 START_DATE = date(2025, 7, 8)
-END_DATE = date(2025, 9, 1)
+END_DATE   = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
 
 # ───────── Generate Spaced Schedule ─────────
 @st.cache_data
 def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
     total_days = (end_dt - start_dt).days + 1
+    # initialize last-seen far in the past
     last_seen = {t: start_dt - timedelta(days=total_days) for t in topics}
     schedule = []
 
-    for day_offset in range(total_days):
-        current_date = start_dt + timedelta(days=day_offset)
-        # If Thursday → FL practice exam
-        if current_date.weekday() == 3:  # Monday=0, Thursday=3
-            schedule.append({
-                "Date": current_date,
-                "Activity": "FL Practice Exam"
-            })
+    for day in range(total_days):
+        current = start_dt + timedelta(days=day)
+
+        # Thursday → FL practice exam
+        if current.weekday() == 3:  # Monday=0 … Thursday=3
+            schedule.append({"Date": current, "Activity": "FL Practice Exam"})
             continue
 
-        # Otherwise, pick topics as before
+        # pick per_day topics with distinct subjects
         pool = topics.copy()
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
-        today_topics = pool[:per_day]
-        for t in today_topics:
-            last_seen[t] = current_date
 
-        entry = {"Date": current_date}
-        for i, topic in enumerate(today_topics, start=1):
-            entry[f"Topic {i}"] = topic
+        today, seen_subj = [], set()
+        for topic in pool:
+            # subject = everything before the last token (e.g. "Gen chem" from "Gen chem 1-2")
+            parts   = topic.split()
+            subject = " ".join(parts[:-1])
+            if subject in seen_subj:
+                continue
+            today.append(topic)
+            seen_subj.add(subject)
+            last_seen[topic] = current
+            if len(today) == per_day:
+                break
+
+        # record topics; if fewer than per_day (unlikely here), the rest stays NaN
+        entry = {"Date": current}
+        for i, t in enumerate(today, start=1):
+            entry[f"Topic {i}"] = t
         schedule.append(entry)
 
     return schedule
@@ -65,23 +75,21 @@ long_df = (
     .reset_index()
     .melt(
         id_vars=["Date"],
-        value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
+        value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
         var_name="Position",
         value_name="Topic"
     )
-    .dropna(subset=["Topic"])  # exclude Thursdays
+    .dropna(subset=["Topic"])  # skip Thursdays & any missing
 )
-
 gaps = []
-for topic, group in long_df.groupby("Topic"):
-    dates = group["Date"].sort_values()
-    deltas = dates.diff().dt.days.dropna()
+for topic, grp in long_df.groupby("Topic"):
+    days = grp["Date"].sort_values()
+    deltas = days.diff().dt.days.dropna()
     gaps.extend(deltas.tolist())
-
 avg_gap = sum(gaps) / len(gaps) if gaps else 0
 
 # ───────── Display Schedule and Metrics ─────────
-st.subheader(f"Spaced Review: {START_DATE.strftime('%b %d, %Y')} → {END_DATE.strftime('%b %d, %Y')}")
+st.subheader(f"Spaced Review: {START_DATE:%b %d, %Y} → {END_DATE:%b %d, %Y}")
 st.markdown(f"**Average spacing between topic reviews:** {avg_gap:.1f} days")
 st.dataframe(df)
 
