@@ -5,8 +5,8 @@ import random
 import io
 
 # ───────── Page Configuration ─────────
-st.set_page_config(page_title="📆 Spaced Daily Topic Review", layout="wide")
-st.title("📚 Spaced Daily Topic Review Schedule")
+st.set_page_config(page_title="📆 Spaced Daily Topic Review (Optimized)", layout="wide")
+st.title("📚 Spaced Daily Topic Review Schedule (min-avg-spacing)")
 
 # ───────── Fixed Topics List ─────────
 TOPICS = [
@@ -23,85 +23,79 @@ START_DATE = date(2025, 7, 8)
 END_DATE   = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
 
-# ───────── Generate Spaced Schedule ─────────
-@st.cache_data
-def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
+# ───────── Generate One Candidate Schedule ─────────
+def generate_schedule(topics, start_dt, end_dt, per_day, seed):
+    random.seed(seed)
     total_days = (end_dt - start_dt).days + 1
-    # initialize last-seen far in the past
     last_seen = {t: start_dt - timedelta(days=total_days) for t in topics}
-    schedule = []
+    sched = []
 
-    for day in range(total_days):
-        current = start_dt + timedelta(days=day)
-
-        # Thursday → FL practice exam
-        if current.weekday() == 3:  # Monday=0 … Thursday=3
-            schedule.append({"Date": current, "Activity": "FL Practice Exam"})
+    for i in range(total_days):
+        today = start_dt + timedelta(days=i)
+        if today.weekday() == 3:  # Thursday → FL Practice Exam
+            sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        # pick per_day topics with distinct subjects
         pool = topics.copy()
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
 
-        today, seen_subj = [], set()
+        today_topics, seen_subj = [], set()
         for topic in pool:
-            # subject = everything before the last token (e.g. "Gen chem" from "Gen chem 1-2")
-            parts   = topic.split()
-            subject = " ".join(parts[:-1])
-            if subject in seen_subj:
+            subj = " ".join(topic.split()[:-1])
+            if subj in seen_subj:
                 continue
-            today.append(topic)
-            seen_subj.add(subject)
-            last_seen[topic] = current
-            if len(today) == per_day:
+            today_topics.append(topic)
+            seen_subj.add(subj)
+            last_seen[topic] = today
+            if len(today_topics) == per_day:
                 break
 
-        # record topics; if fewer than per_day (unlikely here), the rest stays NaN
-        entry = {"Date": current}
-        for i, t in enumerate(today, start=1):
-            entry[f"Topic {i}"] = t
-        schedule.append(entry)
+        entry = {"Date": today}
+        for idx, t in enumerate(today_topics, 1):
+            entry[f"Topic {idx}"] = t
+        sched.append(entry)
 
-    return schedule
+    return sched
 
-# ───────── Build Schedule DataFrame ─────────
-schedule = generate_spaced_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY)
-df = pd.DataFrame(schedule).set_index("Date")
-
-# ───────── Compute Average Spacing ─────────
-long_df = (
-    df
-    .reset_index()
-    .melt(
-        id_vars=["Date"],
-        value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
-        var_name="Position",
-        value_name="Topic"
+# ───────── Compute Average Gap ─────────
+def avg_spacing(schedule):
+    df_long = (
+        pd.DataFrame(schedule)
+          .melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
+                var_name="Pos", value_name="Topic")
+          .dropna(subset=["Topic"])
     )
-    .dropna(subset=["Topic"])  # skip Thursdays & any missing
-)
-gaps = []
-for topic, grp in long_df.groupby("Topic"):
-    days = grp["Date"].sort_values()
-    deltas = days.diff().dt.days.dropna()
-    gaps.extend(deltas.tolist())
-avg_gap = sum(gaps) / len(gaps) if gaps else 0
+    gaps = []
+    for _, grp in df_long.groupby("Topic"):
+        dts = grp["Date"].sort_values()
+        gaps.extend(dts.diff().dt.days.dropna().tolist())
+    return (sum(gaps)/len(gaps)) if gaps else float("inf")
 
-# ───────── Display Schedule and Metrics ─────────
-st.subheader(f"Spaced Review: {START_DATE:%b %d, %Y} → {END_DATE:%b %d, %Y}")
-st.markdown(f"**Average spacing between topic reviews:** {avg_gap:.1f} days")
+# ───────── Trial Loop ─────────
+trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
+best = {"avg": float("inf"), "sched": None}
+
+for seed in range(trials):
+    cand = generate_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY, seed)
+    a = avg_spacing(cand)
+    if a < best["avg"]:
+        best.update(avg=a, sched=cand)
+
+# ───────── Build DataFrame & Show ─────────
+df = pd.DataFrame(best["sched"]).set_index("Date")
+st.subheader(f"Best average spacing: {best['avg']:.1f} days (over {trials} trials)")
 st.dataframe(df)
 
 # ───────── Export to Excel ─────────
-buffer = io.BytesIO()
-with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+buf = io.BytesIO()
+with pd.ExcelWriter(buf, engine="openpyxl") as writer:
     df.to_excel(writer, sheet_name="Spaced Review")
-buffer.seek(0)
+buf.seek(0)
 
 st.download_button(
-    label="📥 Export to Excel",
-    data=buffer,
-    file_name="spaced_daily_review_schedule.xlsx",
+    label="📥 Export Optimized Schedule",
+    data=buf,
+    file_name="optimized_spaced_review.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
