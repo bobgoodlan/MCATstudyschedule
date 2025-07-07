@@ -73,7 +73,7 @@ def avg_spacing(schedule):
     return (sum(gaps)/len(gaps)) if gaps else float("inf")
 
 # ───────── Trial Loop ─────────
-trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
+trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=200000, value=200, step=10)
 best = {"avg": float("inf"), "sched": None}
 
 for seed in range(trials):
