@@ -27,25 +27,32 @@ TOPICS_PER_DAY = 4
 @st.cache_data
 def generate_spaced_schedule(topics, start_dt, end_dt, per_day):
     total_days = (end_dt - start_dt).days + 1
-    # Initialize last-seen dates far in the past
     last_seen = {t: start_dt - timedelta(days=total_days) for t in topics}
     schedule = []
+
     for day_offset in range(total_days):
         current_date = start_dt + timedelta(days=day_offset)
-        # Randomize order for tie-breaking on equal last_seen
+        # If Thursday → FL practice exam
+        if current_date.weekday() == 3:  # Monday=0, Thursday=3
+            schedule.append({
+                "Date": current_date,
+                "Activity": "FL Practice Exam"
+            })
+            continue
+
+        # Otherwise, pick topics as before
         pool = topics.copy()
         random.shuffle(pool)
-        # Sort by ascending last_seen date
         pool.sort(key=lambda t: last_seen[t])
         today_topics = pool[:per_day]
-        # Update last_seen
         for t in today_topics:
             last_seen[t] = current_date
-        # Record schedule
+
         entry = {"Date": current_date}
         for i, topic in enumerate(today_topics, start=1):
             entry[f"Topic {i}"] = topic
         schedule.append(entry)
+
     return schedule
 
 # ───────── Build Schedule DataFrame ─────────
@@ -53,15 +60,24 @@ schedule = generate_spaced_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY
 df = pd.DataFrame(schedule).set_index("Date")
 
 # ───────── Compute Average Spacing ─────────
-# Melt to long form for diff calculation
-long_df = df.reset_index().melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)], var_name="Position", value_name="Topic")
-# Group by topic and compute gaps
+long_df = (
+    df
+    .reset_index()
+    .melt(
+        id_vars=["Date"],
+        value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
+        var_name="Position",
+        value_name="Topic"
+    )
+    .dropna(subset=["Topic"])  # exclude Thursdays
+)
+
 gaps = []
 for topic, group in long_df.groupby("Topic"):
     dates = group["Date"].sort_values()
     deltas = dates.diff().dt.days.dropna()
     gaps.extend(deltas.tolist())
-# Overall average gap
+
 avg_gap = sum(gaps) / len(gaps) if gaps else 0
 
 # ───────── Display Schedule and Metrics ─────────
