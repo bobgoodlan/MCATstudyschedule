@@ -22,6 +22,7 @@ TOPICS = [
 START_DATE = date(2025, 7, 8)
 END_DATE   = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
+VACATION_DAYS = {date(2025, 7, 11), date(2025, 7, 12), date(2025, 7, 13)}
 
 # ───────── Generate One Candidate Schedule ─────────
 def generate_schedule(topics, start_dt, end_dt, per_day, seed):
@@ -32,6 +33,11 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
 
     for i in range(total_days):
         today = start_dt + timedelta(days=i)
+
+        if today in VACATION_DAYS:
+            sched.append({"Date": today, "Activity": "Vacation"})
+            continue
+
         if today.weekday() == 3:  # Thursday → FL Practice Exam
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
