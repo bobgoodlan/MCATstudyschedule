@@ -58,7 +58,7 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             continue
 
         # Filter out fixed topics
-        pool = [t for t in topics if t not in FIXED_TOPICS]
+        pool = topics.copy()
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
 
