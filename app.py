@@ -22,7 +22,7 @@ TOPICS = [
 START_DATE = date(2025, 7, 8)
 END_DATE   = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
-VACATION_DAYS = {date(2025, 7, 11), date(2025, 7, 12), date(2025, 7, 13)}
+VACATION_DAYS = {date(2025, 7, 11), date(2025, 7, 12), date(2025, 7, 13), date(2025, 7, 14)}
 
 # ───────── Generate One Candidate Schedule ─────────
 def generate_schedule(topics, start_dt, end_dt, per_day, seed):
