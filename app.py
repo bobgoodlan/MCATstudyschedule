@@ -20,9 +20,16 @@ TOPICS = [
 
 # ───────── Schedule Parameters ─────────
 START_DATE = date(2025, 7, 8)
-END_DATE   = date(2025, 9, 1)
+END_DATE = date(2025, 9, 1)
 TOPICS_PER_DAY = 4
 VACATION_DAYS = {date(2025, 7, 11), date(2025, 7, 12), date(2025, 7, 13), date(2025, 7, 14)}
+
+# ───────── Fixed Schedule Entries ─────────
+FIXED_DAYS = {
+    date(2025, 7, 8): ["Biochem 1-2", "Physics 8-9", "Bio 7-8", "Behavioural 1-2"],
+    date(2025, 7, 9): ["Gen chem 10/11", "Biochem 5-6", "Bio 5-6", "Physics 5-6"]
+}
+FIXED_TOPICS = {t for topics in FIXED_DAYS.values() for t in topics}
 
 # ───────── Generate One Candidate Schedule ─────────
 def generate_schedule(topics, start_dt, end_dt, per_day, seed):
@@ -38,11 +45,19 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             sched.append({"Date": today, "Activity": "Vacation"})
             continue
 
+        if today in FIXED_DAYS:
+            entry = {"Date": today}
+            for idx, topic in enumerate(FIXED_DAYS[today], 1):
+                entry[f"Topic {idx}"] = topic
+                last_seen[topic] = today
+            sched.append(entry)
+            continue
+
         if today.weekday() == 3:  # Thursday → FL Practice Exam
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        pool = topics.copy()
+        pool = [t for t in topics if t not in FIXED_TOPICS]
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
 
@@ -68,7 +83,7 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
 def avg_spacing(schedule):
     df_long = (
         pd.DataFrame(schedule)
-          .melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
+          .melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
                 var_name="Pos", value_name="Topic")
           .dropna(subset=["Topic"])
     )
@@ -76,7 +91,7 @@ def avg_spacing(schedule):
     for _, grp in df_long.groupby("Topic"):
         dts = grp["Date"].sort_values()
         gaps.extend(dts.diff().dt.days.dropna().tolist())
-    return (sum(gaps)/len(gaps)) if gaps else float("inf")
+    return (sum(gaps) / len(gaps)) if gaps else float("inf")
 
 # ───────── Trial Loop ─────────
 trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
