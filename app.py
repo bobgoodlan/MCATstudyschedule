@@ -57,6 +57,7 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
+        # Filter out fixed topics
         pool = [t for t in topics if t not in FIXED_TOPICS]
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
@@ -87,10 +88,14 @@ def avg_spacing(schedule):
                 var_name="Pos", value_name="Topic")
           .dropna(subset=["Topic"])
     )
+    df_long["Date"] = pd.to_datetime(df_long["Date"])  # Ensure datetime format
+
     gaps = []
     for _, grp in df_long.groupby("Topic"):
         dts = grp["Date"].sort_values()
-        gaps.extend(dts.diff().dt.days.dropna().tolist())
+        diffs = dts.diff().dt.days.dropna()
+        gaps.extend(diffs.tolist())
+
     return (sum(gaps) / len(gaps)) if gaps else float("inf")
 
 # ───────── Trial Loop ─────────
