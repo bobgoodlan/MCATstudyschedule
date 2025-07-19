@@ -6,7 +6,7 @@ import io
 
 # ───────── Page Configuration ─────────
 st.set_page_config(page_title="📆 Spaced Daily Topic Review (Optimized)", layout="wide")
-st.title("📚 Spaced Daily Topic Review Schedule (min-avg-spacing)")
+st.title("📚 Spaced Daily Topic Review Schedule (min-avg-spacing, max-min-reviews)")
 
 # ───────── Fixed Topics List ─────────
 TOPICS = [
@@ -19,17 +19,20 @@ TOPICS = [
 ]
 
 # ───────── Schedule Parameters ─────────
-START_DATE = date(2025, 7, 8)
-END_DATE = date(2025, 9, 1)
-TOPICS_PER_DAY = 4
-VACATION_DAYS = {date(2025, 7, 11), date(2025, 7, 12), date(2025, 7, 13), date(2025, 7, 14)}
+START_DATE = date(2025, 7, 21)
+END_DATE   = date(2025, 8, 31)
+TOPICS_PER_DAY = 5
+
+VACATION_DAYS = {
+    date(2025, 7, 11), date(2025, 7, 12),
+    date(2025, 7, 13), date(2025, 7, 14),
+}
 
 # ───────── Fixed Schedule Entries ─────────
 FIXED_DAYS = {
-    date(2025, 7, 8): ["Biochem 1-2", "Physics 8-9", "Bio 7-8", "Behavioural 1-2"],
-    date(2025, 7, 9): ["Gen chem 10/11", "Biochem 5-6", "Bio 5-6", "Physics 5-6"]
+    # (none in this range; you can add if needed)
 }
-FIXED_TOPICS = {t for topics in FIXED_DAYS.values() for t in topics}
+FIXED_TOPICS = set()
 
 # ───────── Generate One Candidate Schedule ─────────
 def generate_schedule(topics, start_dt, end_dt, per_day, seed):
@@ -57,8 +60,7 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        # Filter out fixed topics
-        pool = topics.copy()
+        pool = [t for t in topics if t not in FIXED_TOPICS]
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
 
@@ -88,29 +90,39 @@ def avg_spacing(schedule):
                 var_name="Pos", value_name="Topic")
           .dropna(subset=["Topic"])
     )
-    df_long["Date"] = pd.to_datetime(df_long["Date"])  # Ensure datetime format
-
+    df_long["Date"] = pd.to_datetime(df_long["Date"])
     gaps = []
     for _, grp in df_long.groupby("Topic"):
         dts = grp["Date"].sort_values()
         diffs = dts.diff().dt.days.dropna()
         gaps.extend(diffs.tolist())
-
     return (sum(gaps) / len(gaps)) if gaps else float("inf")
 
-# ───────── Trial Loop ─────────
+# ───────── Optimization Trials ─────────
 trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
-best = {"avg": float("inf"), "sched": None}
+best = {"avg": float("inf"), "min_reviews": -1, "sched": None}
 
 for seed in range(trials):
     cand = generate_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY, seed)
     a = avg_spacing(cand)
-    if a < best["avg"]:
-        best.update(avg=a, sched=cand)
 
-# ───────── Build DataFrame & Show ─────────
+    # count reviews per topic
+    df_long = (
+        pd.DataFrame(cand)
+          .melt(id_vars=["Date"], value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
+                var_name="Pos", value_name="Topic")
+          .dropna(subset=["Topic"])
+    )
+    counts = df_long["Topic"].value_counts()
+    min_cnt = counts.min()
+
+    # primary: lower avg spacing; secondary: higher min reviews
+    if (a < best["avg"]) or (a == best["avg"] and min_cnt > best["min_reviews"]):
+        best.update(avg=a, min_reviews=min_cnt, sched=cand)
+
+# ───────── Display Best Schedule ─────────
 df = pd.DataFrame(best["sched"]).set_index("Date")
-st.subheader(f"Best average spacing: {best['avg']:.1f} days (over {trials} trials)")
+st.subheader(f"Best avg spacing: {best['avg']:.1f} days  |  Min reviews/topic: {best['min_reviews']}")
 st.dataframe(df)
 
 # ───────── Export to Excel ─────────
