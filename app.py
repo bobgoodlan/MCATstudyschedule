@@ -43,19 +43,28 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
 
     for i in range(total_days):
         today = start_dt + timedelta(days=i)
+
+        # skip vacation days
         if today in VACATION_DAYS:
             sched.append({"Date": today, "Activity": "Vacation"})
             continue
-        if today.weekday() == 3:  # Thursday → FL Practice Exam
+
+        # skip weekends
+        if today.weekday() >= 5:  # Saturday=5, Sunday=6
+            sched.append({"Date": today, "Activity": "Weekend"})
+            continue
+
+        # skip practice exams
+        if today.weekday() == 3:  # Thursday
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        # force‑include any fixed topics today
+        # force‑include fixed topics today
         fixed_today = FIXED_DAYS.get(today, [])
         for t in fixed_today:
             last_seen[t] = today
 
-        # pick remaining slots (excluding only today's forced)
+        # pick remaining slots (excluding only today's fixed)
         slots = per_day - len(fixed_today)
         pool = [t for t in topics if t not in fixed_today]
         random.shuffle(pool)
@@ -72,9 +81,9 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             if len(today_topics) == slots:
                 break
 
+        # build entry: fixed_today first, then sampled
         entry = {"Date": today}
-        all_topics = fixed_today + today_topics
-        for idx, t in enumerate(all_topics, 1):
+        for idx, t in enumerate(fixed_today + today_topics, 1):
             entry[f"Topic {idx}"] = t
         sched.append(entry)
 
@@ -115,6 +124,7 @@ for seed in range(trials):
     counts = df_long["Topic"].value_counts()
     min_cnt = counts.min()
 
+    # choose by avg gap, then by minimum reviews
     if (a < best["avg"]) or (a == best["avg"] and min_cnt > best["min_reviews"]):
         best.update(avg=a, min_reviews=min_cnt, sched=cand)
 
