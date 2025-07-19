@@ -44,27 +44,27 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
     for i in range(total_days):
         today = start_dt + timedelta(days=i)
 
-        # skip vacation days
+        # skip vacation
         if today in VACATION_DAYS:
             sched.append({"Date": today, "Activity": "Vacation"})
             continue
 
         # skip weekends
-        if today.weekday() >= 5:  # Saturday=5, Sunday=6
+        if today.weekday() >= 5:
             sched.append({"Date": today, "Activity": "Weekend"})
             continue
 
-        # skip practice exams
-        if today.weekday() == 3:  # Thursday
+        # skip FL Practice Exam (Thursdays)
+        if today.weekday() == 3:
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        # force‑include fixed topics today
+        # forced topics for today
         fixed_today = FIXED_DAYS.get(today, [])
         for t in fixed_today:
             last_seen[t] = today
 
-        # pick remaining slots (excluding only today's fixed)
+        # select remaining slots
         slots = per_day - len(fixed_today)
         pool = [t for t in topics if t not in fixed_today]
         random.shuffle(pool)
@@ -81,7 +81,6 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             if len(today_topics) == slots:
                 break
 
-        # build entry: fixed_today first, then sampled
         entry = {"Date": today}
         for idx, t in enumerate(fixed_today + today_topics, 1):
             entry[f"Topic {idx}"] = t
@@ -107,7 +106,9 @@ def avg_spacing(schedule):
     return (sum(gaps)/len(gaps)) if gaps else float("inf")
 
 # ───────── Optimization Trials ─────────
-trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
+trials = st.sidebar.number_input(
+    "Optimization trials", min_value=10, max_value=2000, value=200, step=10
+)
 best = {"avg": float("inf"), "min_reviews": -1, "sched": None}
 
 for seed in range(trials):
@@ -124,27 +125,21 @@ for seed in range(trials):
     counts = df_long["Topic"].value_counts()
     min_cnt = counts.min()
 
-    # choose by avg gap, then by minimum reviews
     if (a < best["avg"]) or (a == best["avg"] and min_cnt > best["min_reviews"]):
         best.update(avg=a, min_reviews=min_cnt, sched=cand)
 
-# ───────── Display Best Schedule ─────────
-df_best = pd.DataFrame(best["sched"]).set_index("Date")
-st.subheader(f"Best avg spacing: {best['avg']:.1f} days  |  Min reviews/topic: {best['min_reviews']}")
-st.dataframe(df_best)
-
 # ───────── Compute Per-Topic Metrics ─────────
-df_long = (
+metrics_long = (
     pd.DataFrame(best["sched"])
       .melt(id_vars=["Date"],
             value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
             var_name="Slot", value_name="Topic")
       .dropna(subset=["Topic"])
 )
-df_long["Date"] = pd.to_datetime(df_long["Date"])
+metrics_long["Date"] = pd.to_datetime(metrics_long["Date"])
 
 metrics = []
-for topic, grp in df_long.groupby("Topic"):
+for topic, grp in metrics_long.groupby("Topic"):
     dates = grp["Date"].sort_values()
     gaps = dates.diff().dt.days.dropna()
     avg_gap = gaps.mean() if not gaps.empty else 0
@@ -154,20 +149,39 @@ for topic, grp in df_long.groupby("Topic"):
         "Avg Gap (days)": round(avg_gap, 2)
     })
 
-metrics_df = pd.DataFrame(metrics).sort_values("Topic").reset_index(drop=True)
-st.subheader("Per-Topic Review Metrics")
-st.dataframe(metrics_df)
+metrics_df = pd.DataFrame(metrics)
 
-# ───────── Export to Excel ─────────
+# ───────── Append Sept 2 Review of Least-Examined Topics ─────────
+least_count = metrics_df["Review Count"].min()
+least_topics = (
+    metrics_df[metrics_df["Review Count"] == least_count]
+    .sort_values("Topic")["Topic"]
+    .tolist()[:TOPICS_PER_DAY]
+)
+sep2_entry = {"Date": date(2025, 9, 2)}
+for idx, t in enumerate(least_topics, 1):
+    sep2_entry[f"Topic {idx}"] = t
+full_sched = best["sched"] + [sep2_entry]
+
+# ───────── Display & Export ─────────
+df_full = pd.DataFrame(full_sched).set_index("Date").sort_index()
+st.subheader(
+    f"Best avg spacing: {best['avg']:.1f} days  |  Min reviews/topic: {best['min_reviews']}"
+)
+st.dataframe(df_full)
+
+st.subheader("Per-Topic Review Metrics")
+st.dataframe(metrics_df.sort_values("Topic").reset_index(drop=True))
+
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-    df_best.to_excel(writer, sheet_name="Spaced Review")
+    df_full.to_excel(writer, sheet_name="Spaced Review")
     metrics_df.to_excel(writer, sheet_name="Metrics", index=False)
 buf.seek(0)
 
 st.download_button(
-    label="📥 Export Optimized Schedule + Metrics",
+    label="📥 Export Schedule + Metrics",
     data=buf,
-    file_name="optimized_spaced_review_with_metrics.xlsx",
+    file_name="optimized_spaced_review_with_sept2.xlsx",
     mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
 )
