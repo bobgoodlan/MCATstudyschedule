@@ -19,22 +19,20 @@ TOPICS = [
 ]
 
 # ───────── Schedule Parameters ─────────
-START_DATE      = date(2025, 7, 21)
-END_DATE        = date(2025, 8, 31)
-TOPICS_PER_DAY  = 5
-VACATION_DAYS   = {
+START_DATE     = date(2025, 7, 21)
+END_DATE       = date(2025, 8, 31)
+TOPICS_PER_DAY = 5
+
+VACATION_DAYS = {
     date(2025, 7, 11), date(2025, 7, 12),
     date(2025, 7, 13), date(2025, 7, 14),
 }
 
-# ───────── Fixed Schedule Entries ─────────
+# ───────── Fixed‑day Overrides ─────────
 FIXED_DAYS = {
-    # Day 1: both bio units
     date(2025, 7, 21): ["Bio 9-10", "Bio 11-12"],
-    # Day 2: orgo + biochem
     date(2025, 7, 22): ["O chem 11-12", "Biochem 10/11"],
 }
-FIXED_TOPICS = {t for topics in FIXED_DAYS.values() for t in topics}
 
 # ───────── Generate One Candidate Schedule ─────────
 def generate_schedule(topics, start_dt, end_dt, per_day, seed):
@@ -45,24 +43,21 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
 
     for i in range(total_days):
         today = start_dt + timedelta(days=i)
-
         if today in VACATION_DAYS:
             sched.append({"Date": today, "Activity": "Vacation"})
             continue
-
-        if today in FIXED_DAYS:
-            entry = {"Date": today}
-            for idx, topic in enumerate(FIXED_DAYS[today], 1):
-                entry[f"Topic {idx}"] = topic
-                last_seen[topic] = today
-            sched.append(entry)
-            continue
-
         if today.weekday() == 3:  # Thursday → FL Practice Exam
             sched.append({"Date": today, "Activity": "FL Practice Exam"})
             continue
 
-        pool = [t for t in topics if t not in FIXED_TOPICS]
+        # force‑include any fixed topics today
+        fixed_today = FIXED_DAYS.get(today, [])
+        for t in fixed_today:
+            last_seen[t] = today
+
+        # pick remaining slots (excluding only today's forced)
+        slots = per_day - len(fixed_today)
+        pool = [t for t in topics if t not in fixed_today]
         random.shuffle(pool)
         pool.sort(key=lambda t: last_seen[t])
 
@@ -74,12 +69,11 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
             today_topics.append(topic)
             seen_subj.add(subj)
             last_seen[topic] = today
-            if len(today_topics) == per_day - len(FIXED_DAYS.get(today, [])):
+            if len(today_topics) == slots:
                 break
 
         entry = {"Date": today}
-        # merge fixed + generated topics in slot order
-        all_topics = FIXED_DAYS.get(today, []) + today_topics
+        all_topics = fixed_today + today_topics
         for idx, t in enumerate(all_topics, 1):
             entry[f"Topic {idx}"] = t
         sched.append(entry)
@@ -88,36 +82,34 @@ def generate_schedule(topics, start_dt, end_dt, per_day, seed):
 
 # ───────── Compute Average Gap ─────────
 def avg_spacing(schedule):
-    df_long = (
+    df = (
         pd.DataFrame(schedule)
           .melt(id_vars=["Date"],
-                value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
-                var_name="Pos", value_name="Topic")
+                value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
+                var_name="Slot", value_name="Topic")
           .dropna(subset=["Topic"])
     )
-    df_long["Date"] = pd.to_datetime(df_long["Date"])
+    df["Date"] = pd.to_datetime(df["Date"])
     gaps = []
-    for _, grp in df_long.groupby("Topic"):
-        dts = grp["Date"].sort_values()
-        diffs = dts.diff().dt.days.dropna()
+    for _, grp in df.groupby("Topic"):
+        days = grp["Date"].sort_values()
+        diffs = days.diff().dt.days.dropna()
         gaps.extend(diffs.tolist())
-    return (sum(gaps) / len(gaps)) if gaps else float("inf")
+    return (sum(gaps)/len(gaps)) if gaps else float("inf")
 
 # ───────── Optimization Trials ─────────
-trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000,
-                                 value=200, step=10)
+trials = st.sidebar.number_input("Optimization trials", min_value=10, max_value=2000, value=200, step=10)
 best = {"avg": float("inf"), "min_reviews": -1, "sched": None}
 
 for seed in range(trials):
-    cand = generate_schedule(TOPICS, START_DATE, END_DATE,
-                              TOPICS_PER_DAY, seed)
+    cand = generate_schedule(TOPICS, START_DATE, END_DATE, TOPICS_PER_DAY, seed)
     a = avg_spacing(cand)
 
     df_long = (
         pd.DataFrame(cand)
           .melt(id_vars=["Date"],
-                value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY + 1)],
-                var_name="Pos", value_name="Topic")
+                value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
+                var_name="Slot", value_name="Topic")
           .dropna(subset=["Topic"])
     )
     counts = df_long["Topic"].value_counts()
@@ -126,19 +118,46 @@ for seed in range(trials):
     if (a < best["avg"]) or (a == best["avg"] and min_cnt > best["min_reviews"]):
         best.update(avg=a, min_reviews=min_cnt, sched=cand)
 
-# ───────── Display & Export ─────────
-df = pd.DataFrame(best["sched"]).set_index("Date")
+# ───────── Display Best Schedule ─────────
+df_best = pd.DataFrame(best["sched"]).set_index("Date")
 st.subheader(f"Best avg spacing: {best['avg']:.1f} days  |  Min reviews/topic: {best['min_reviews']}")
-st.dataframe(df)
+st.dataframe(df_best)
 
+# ───────── Compute Per-Topic Metrics ─────────
+df_long = (
+    pd.DataFrame(best["sched"])
+      .melt(id_vars=["Date"],
+            value_vars=[f"Topic {i}" for i in range(1, TOPICS_PER_DAY+1)],
+            var_name="Slot", value_name="Topic")
+      .dropna(subset=["Topic"])
+)
+df_long["Date"] = pd.to_datetime(df_long["Date"])
+
+metrics = []
+for topic, grp in df_long.groupby("Topic"):
+    dates = grp["Date"].sort_values()
+    gaps = dates.diff().dt.days.dropna()
+    avg_gap = gaps.mean() if not gaps.empty else 0
+    metrics.append({
+        "Topic": topic,
+        "Review Count": len(grp),
+        "Avg Gap (days)": round(avg_gap, 2)
+    })
+
+metrics_df = pd.DataFrame(metrics).sort_values("Topic").reset_index(drop=True)
+st.subheader("Per-Topic Review Metrics")
+st.dataframe(metrics_df)
+
+# ───────── Export to Excel ─────────
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-    df.to_excel(writer, sheet_name="Spaced Review")
+    df_best.to_excel(writer, sheet_name="Spaced Review")
+    metrics_df.to_excel(writer, sheet_name="Metrics", index=False)
 buf.seek(0)
 
 st.download_button(
-    label="📥 Export Optimized Schedule",
+    label="📥 Export Optimized Schedule + Metrics",
     data=buf,
-    file_name="optimized_spaced_review.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    file_name="optimized_spaced_review_with_metrics.xlsx",
+    mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
 )
